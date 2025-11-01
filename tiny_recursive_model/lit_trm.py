@@ -151,7 +151,7 @@ class LitTRM(L.LightningModule):
             # Optimize based on accumulated gradients for full batch
             opt.step()
             opt.zero_grad()
-            # sch.step()
+            sch.step()
 
             # Combine microbatch results
             y_batch = torch.cat(y_acc, dim=0)
