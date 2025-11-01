@@ -105,43 +105,6 @@ class LitTRM(L.LightningModule):
 
         self.automatic_optimization = False
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.learning_rate,
-            betas=(self.beta1, self.beta2),
-            weight_decay=self.weight_decay,
-        )
-        # optimizer:
-        # class_path: torch.optim.AdamW
-        # init_args:
-        #     lr: 1.0e-4
-        #     betas: [0.9, 0.95]
-        #     weight_decay: 1.0
-        #
-        # lr_scheduler:
-        # class_path: torch.optim.lr_scheduler.LinearLR
-        # init_args:
-        #     start_factor: 0.0005  # 1 / warmup_steps
-        #     end_factor: 1.0
-        #     total_iters: 1999     # warmup_steps - 1
-        # Linear warmup to 1.0 over warmup_steps, then constant
-        warmup = lambda step: min((step + 1) / max(1, self.warmup_steps), 1.0)
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, warmup)
-        # scheduler = torch.optim.lr_scheduler.LinearLR(
-        #     optimizer,
-        #     start_factor=1 / self.warmup_steps,
-        #     total_iters=self.warmup_steps - 1,
-        # )
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "step",
-                "frequency": 1,
-            },
-        }
-
     def training_step(self, batch, batch_idx) -> Tensor:
         # Manual optimization: https://lightning.ai/docs/pytorch/stable/model/manual_optimization.html
         # Similar to TBPTT: https://lightning.ai/docs/pytorch/stable/common/tbptt.html
@@ -218,6 +181,7 @@ class LitTRM(L.LightningModule):
         total_loss = 0.0
         samples = 0
 
+        # No microbatches required
         for _ in range(self.N_supervision):
             (y, z), y_hat, q_hat = self.model(x_input, y, z)
 

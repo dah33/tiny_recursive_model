@@ -2,13 +2,23 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "Train Model (needs ~40GB VRAM)",
+            "type": "shell",
+            "command": "uv run tiny_recursive_model/main.py fit --config config_base.yaml",
+        },
+        {
             "label": "Train Model (RTX 2060 with 6GB VRAM)",
             "type": "shell",
-            "command": "uv run tiny_recursive_model.main --config config_base.yaml --config config_2060.yaml",
+            "command": "uv run tiny_recursive_model/main.py fit --config config_base.yaml --config config_2060.yaml",
             "group": {
                 "kind": "build",
                 "isDefault": true
             }
+        },
+        {
+            "label": "Train Model (Fast Fail)",
+            "type": "shell",
+            "command": "uv run tiny_recursive_model/main.py fit --config config_base.yaml --config config_2060.yaml --trainer.fast_dev_run=true",
         },
         {
             "label": "Build Sudoku-Extreme Dataset",

@@ -4,7 +4,7 @@
 # > uv run tiny_recursive_model.main --config config_base.yaml --config config_2060.yaml
 #
 # For a fast fail, add this at command line:
-# > --trainer.fast_dev_run=false
+# > --trainer.fast_dev_run=true
 model:
   n_layers: 2
   T: 2
