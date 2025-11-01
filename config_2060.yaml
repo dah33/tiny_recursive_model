@@ -1,0 +1,13 @@
+# lightning.pytorch==2.5.5
+#
+# Smaller model and batches for RTX 2060 (6GB):
+# > uv run tiny_recursive_model.main --config config_base.yaml --config config_2060.yaml
+#
+# For a fast fail, add this at command line:
+# > --trainer.fast_dev_run=false
+model:
+  n_layers: 2
+  T: 2
+  n: 2
+  N_supervision: 1
+  batch_split: 4

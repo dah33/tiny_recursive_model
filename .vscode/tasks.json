@@ -1,0 +1,19 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Train Model (RTX 2060 with 6GB VRAM)",
+            "type": "shell",
+            "command": "uv run tiny_recursive_model.main --config config_base.yaml --config config_2060.yaml",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Build Sudoku-Extreme Dataset",
+            "type": "shell",
+            "command": ".venv/bin/python dataset/build_sudoku_dataset.py --output-dir data/sudoku-extreme-1k-aug-1000 --subsample-size 1000 --num-aug 1000"
+        }
+    ]
+}
