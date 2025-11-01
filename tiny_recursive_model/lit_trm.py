@@ -65,31 +65,17 @@ class LitTRM(L.LightningModule):
         N_supervision: int = 16,
         # Training
         batch_split: int = 1,
-        initial_learning_rate: float = 1e-4,
-        beta1: float = 0.9,
-        beta2: float = 0.95,
-        weight_decay: float = 1.0,  # seems high but matches original TRM
-        warmup_steps: int = 2000,
-        # "loss": "stablemax_cross_entropy",  # Loss function type
     ):
         super().__init__()
+        self.automatic_optimization = False
 
-        # self.save_hyperparameters()
-        # TODO: seed
+        # Save for checkpointing
+        self.save_hyperparameters()
 
-        # Recursion params
-        self.T = T
-        self.n = n
+        # Hyperparameters used in training and forward
         self.halt_prob_threshold = halt_prob_threshold
         self.N_supervision = N_supervision
-
-        # Training params
         self.batch_split = batch_split
-        self.learning_rate = initial_learning_rate
-        self.beta1 = beta1
-        self.beta2 = beta2
-        self.weight_decay = weight_decay
-        self.warmup_steps = warmup_steps
 
         self.model = TinyRecursiveModel(
             vocab_size=vocab_size,
@@ -103,7 +89,6 @@ class LitTRM(L.LightningModule):
             T=T,
         )
 
-        self.automatic_optimization = False
 
     def training_step(self, batch, batch_idx) -> Tensor:
         # Manual optimization: https://lightning.ai/docs/pytorch/stable/model/manual_optimization.html
