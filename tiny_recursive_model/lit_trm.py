@@ -199,5 +199,6 @@ class LitTRM(L.LightningModule):
     def validation_step(self, batch, batch_idx):
         _y_hat, total_loss, samples = self.forward(batch, compute_loss=True)
         avg_loss = total_loss / samples if samples > 0 else 0.0
-        self.log("val/loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
+        # TODO: why do we need on_step=False if validation_step only called on epoch end?
+        self.log("val_loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
         return avg_loss

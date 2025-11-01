@@ -107,8 +107,7 @@ class SudokuDataModule(L.LightningDataModule):
         num_workers: int = 4,
     ):
         super().__init__()
-        self.save_hyperparameters()
-
+      
         self.root_dir = Path(root_dir)
         self.batch_size = batch_size
         self.num_workers = num_workers
