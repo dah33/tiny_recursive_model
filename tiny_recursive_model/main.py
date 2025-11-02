@@ -10,7 +10,7 @@ from tiny_recursive_model.sudoku import SudokuDataModule
 #   - min_halt_steps = (rand() < 0.1) * randint(2, 16)
 #   - halted = halted & (steps >= min_halt_steps)
 #   - This prevents early halting for exploration purposes
-# - EMA
+# - EMA - can use the Weighted callback built into Lightning (soon)
 # - vocab size of 11 seems out by 1?
 # - stablemax_cross_entropy loss function
 # - validation step is dividing by samples...

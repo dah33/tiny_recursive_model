@@ -4,9 +4,7 @@ from einops import rearrange, reduce
 from torch import Tensor
 from torch.nn import functional as F
 
-# from tiny_recursive_model.lit_ema import EMA_Callback
 from tiny_recursive_model.paper.model import TinyRecursiveModel
-
 
 def latent_recursion(net, x, y, z, n=6):  # all are (B, L, D)
     # the network learns to refine the latents if input is passed in, otherwise it refines the output
