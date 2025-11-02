@@ -30,7 +30,7 @@ def softmax_cross_entropy(token_logits: Tensor, target_tokens: Tensor) -> Tensor
     per_token_loss = F.cross_entropy(
         token_logits, target_tokens, reduction="none"
     )  # (B, L)
-    return reduce(per_token_loss, "B ... -> B", "mean").sum()  # scalar
+    return reduce(per_token_loss, "B ... -> B", "mean").mean()  # scalar
 
 
 def binary_cross_entropy(
@@ -40,7 +40,7 @@ def binary_cross_entropy(
     pred_tokens = token_logits.argmax(dim=-1)
     is_seq_correct = (pred_tokens == target_tokens).all(dim=-1)
     return F.binary_cross_entropy_with_logits(
-        halt_logits, is_seq_correct.to(halt_logits.dtype), reduction="sum"
+        halt_logits, is_seq_correct.to(halt_logits.dtype), reduction="mean"
     )
 
 
@@ -118,7 +118,8 @@ class LitTRM(L.LightningModule):
                 (y, z), y_hat, q_hat = self.model(x_input, y, z)
                 pred_loss = softmax_cross_entropy(y_hat, y_true)
                 halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
-                loss = pred_loss + halt_loss  # sum loss, hence no divide by K
+                loss = pred_loss + halt_loss
+                loss /= K  # normalize for gradient accumulation
                 self.manual_backward(loss)
 
                 # Should we halt supervision for each puzzle?
