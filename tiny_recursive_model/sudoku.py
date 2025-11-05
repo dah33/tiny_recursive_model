@@ -107,7 +107,7 @@ class SudokuDataModule(L.LightningDataModule):
         num_workers: int = 4,
     ):
         super().__init__()
-      
+
         self.root_dir = Path(root_dir)
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -117,10 +117,10 @@ class SudokuDataModule(L.LightningDataModule):
     def setup(self, stage: str | None = None):
         # Use full train set for training (1000 puzzles x 1000 augmentations = 1M)
         self.sudoku_train = SudokuDataset(self.root_dir / "train")
-        
-        # Split test set (unique puzzles): 100k for validation, rest for test
+
+        # Split test set (unique puzzles) for validation and final test
         sudoku_test_full = SudokuDataset(self.root_dir / "test")
-        val_size = 100_000
+        val_size = 768 * 4
         test_size = len(sudoku_test_full) - val_size
         self.sudoku_val, self.sudoku_test = random_split(
             sudoku_test_full, [val_size, test_size]

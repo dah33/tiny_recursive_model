@@ -6,6 +6,7 @@ from torch.nn import functional as F
 
 from tiny_recursive_model.paper.model import TinyRecursiveModel
 
+
 def latent_recursion(net, x, y, z, n=6):  # all are (B, L, D)
     # the network learns to refine the latents if input is passed in, otherwise it refines the output
     for _ in range(n):  # latent reasoning
@@ -25,23 +26,18 @@ def deep_recursion(net, output_head, Q_head, x, y, z, n=6, T=3):
 
 
 def softmax_cross_entropy(token_logits: Tensor, target_tokens: Tensor) -> Tensor:
-    # F.cross_entropy expects (B, D, ...)
-    token_logits = rearrange(token_logits, "B L D -> B D L")
-    per_token_loss = F.cross_entropy(
-        token_logits, target_tokens, reduction="none"
-    )  # (B, L)
-    return reduce(per_token_loss, "B ... -> B", "mean").mean()  # scalar
+    flat_logits = rearrange(token_logits, "B L D -> (B L) D")
+    flat_target = rearrange(target_tokens, "B L -> (B L)")
+    return F.cross_entropy(flat_logits, flat_target)  # mean over flattened B x L
 
 
 def binary_cross_entropy(
     halt_logits: Tensor, token_logits: Tensor, target_tokens: Tensor
 ) -> Tensor:
-    # is the whole sequence correct?
-    pred_tokens = token_logits.argmax(dim=-1)
-    is_seq_correct = (pred_tokens == target_tokens).all(dim=-1)
-    return F.binary_cross_entropy_with_logits(
-        halt_logits, is_seq_correct.to(halt_logits.dtype), reduction="mean"
-    )
+    # 1 if the entire predicted sequence matches the target sequence
+    is_seq_correct = (token_logits.argmax(dim=-1) == target_tokens).all(dim=-1)
+    target = is_seq_correct.to(dtype=halt_logits.dtype)
+    return F.binary_cross_entropy_with_logits(halt_logits, target)  # mean over batch
 
 
 class LitTRM(L.LightningModule):
@@ -87,7 +83,6 @@ class LitTRM(L.LightningModule):
             T=T,
         )
 
-
     def training_step(self, batch, batch_idx) -> Tensor:
         # Manual optimization: https://lightning.ai/docs/pytorch/stable/model/manual_optimization.html
         # Similar to TBPTT: https://lightning.ai/docs/pytorch/stable/common/tbptt.html
@@ -98,15 +93,16 @@ class LitTRM(L.LightningModule):
         x_input_batch, y_true_batch, puzzle_ids = batch.values()
         y_batch, z_batch = None, None  # initial hiddens created by model
         halt_batch = torch.zeros_like(puzzle_ids, dtype=torch.bool)
-        initial_batch_size = x_input_batch.shape[0]
-        samples = 0
+        final_loss, final_halt_loss = 0.0, 0.0
+        batch_size = x_input_batch.shape[0]
+        sample_count = 0
 
-        for _ in range(self.N_supervision):
+        for supervision_step in range(self.N_supervision):
 
             # Accumulate gradients over K microbatches
             K = self.batch_split
             y_acc, z_acc, halt_acc = [], [], []
-            loss_acc = 0.0
+            loss_acc, halt_loss_acc = 0.0, 0.0
             for x_input, y, z, y_true, halt in zip(
                 x_input_batch.chunk(K),
                 y_batch.chunk(K) if y_batch is not None else [None] * K,
@@ -119,8 +115,7 @@ class LitTRM(L.LightningModule):
                 pred_loss = softmax_cross_entropy(y_hat, y_true)
                 halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
                 loss = pred_loss + halt_loss
-                loss /= K  # normalize for gradient accumulation
-                self.manual_backward(loss)
+                self.manual_backward(loss / K)  # accumulate over K microbatches
 
                 # Should we halt supervision for each puzzle?
                 halt = q_hat.detach() >= self.halt_prob_threshold
@@ -129,8 +124,9 @@ class LitTRM(L.LightningModule):
                 y_acc.append(y)
                 z_acc.append(z)
                 halt_acc.append(halt)
-                loss_acc += loss.item()
-                samples += x_input.shape[0]
+                loss_acc += loss.item() / K
+                halt_loss_acc += halt_loss.item() / K
+                sample_count += x_input.shape[0]
 
             # Optimize based on accumulated gradients for full batch
             opt.step()
@@ -141,6 +137,11 @@ class LitTRM(L.LightningModule):
             y_batch = torch.cat(y_acc, dim=0)
             z_batch = torch.cat(z_acc, dim=0)
             halt_batch = torch.cat(halt_acc, dim=0)
+
+            # Accumulate losses if at final supervision step
+            is_final_step = halt_batch | (supervision_step == self.N_supervision - 1)
+            final_loss += loss_acc * is_final_step.sum() / batch_size
+            final_halt_loss += halt_loss_acc * is_final_step.sum() / batch_size
 
             # Early stopping if all puzzles have halted
             if halt_batch.all():
@@ -154,29 +155,35 @@ class LitTRM(L.LightningModule):
             y_true_batch = y_true_batch[active]
 
         # Log batch metrics
-        avg_sup_steps = samples / initial_batch_size * self.N_supervision
-        self.log("loss", loss_acc, on_step=True, prog_bar=True)
-        self.log("sup", avg_sup_steps, on_step=True, prog_bar=True)
+        avg_sup_steps = sample_count / batch_size * self.N_supervision
+        self.log("loss", final_loss, on_step=True, prog_bar=True)
+        self.log("halt_loss", final_halt_loss, on_step=True, prog_bar=True)
+        self.log("avg_sup", avg_sup_steps, on_step=True, prog_bar=True)
 
-    def forward(self, batch, compute_loss=False):
+    def forward(self, batch):
         x_input, y_true, puzzle_ids = batch.values()
         y, z = None, None
         halt = torch.zeros_like(puzzle_ids, dtype=torch.bool)
-        total_loss = 0.0
-        samples = 0
+        final_loss, final_halt_loss = 0.0, 0.0
+        batch_size = x_input.shape[0]
+        sample_count = 0
 
         # No microbatches required
-        for _ in range(self.N_supervision):
+        for supervision_step in range(self.N_supervision):
             (y, z), y_hat, q_hat = self.model(x_input, y, z)
 
-            if compute_loss:
-                pred_loss = softmax_cross_entropy(y_hat, y_true)
-                halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
-                loss = pred_loss + halt_loss
-                total_loss += loss.item()
-                samples += x_input.shape[0]
+            pred_loss = softmax_cross_entropy(y_hat, y_true)
+            halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
+            loss = (pred_loss + halt_loss).item()
+            sample_count += x_input.shape[0]
 
             halt = q_hat >= self.halt_prob_threshold
+
+            # Accumulate losses if at final supervision step
+            is_final_step = halt | (supervision_step == self.N_supervision - 1)
+            final_loss += loss * is_final_step.sum() / batch_size
+            final_halt_loss += halt_loss * is_final_step.sum() / batch_size
+
             if halt.all():
                 break
 
@@ -184,20 +191,19 @@ class LitTRM(L.LightningModule):
             x_input = x_input[active]
             y = y[active]
             z = z[active]
-            if compute_loss:
-                y_true = y_true[active]
+            y_true = y_true[active]
 
-        return y_hat, total_loss, samples
+        avg_sup_steps = sample_count / batch_size * self.N_supervision
+        return y_hat, (final_loss, final_halt_loss, avg_sup_steps)
 
     @torch.no_grad()
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        y_hat, _, _ = self.forward(batch, compute_loss=False)
+        y_hat, _ = self.forward(batch)
         return y_hat.argmax(dim=-1)
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        _y_hat, total_loss, samples = self.forward(batch, compute_loss=True)
-        avg_loss = total_loss / samples if samples > 0 else 0.0
-        # TODO: why do we need on_step=False if validation_step only called on epoch end?
-        self.log("val_loss", avg_loss, on_step=False, on_epoch=True, prog_bar=True)
-        return avg_loss
+        _, (loss, halt_loss, avg_sup_steps) = self.forward(batch)
+        self.log("val_loss", loss, prog_bar=True)
+        self.log("halt_loss", halt_loss)
+        self.log("avg_sup_steps", avg_sup_steps)
