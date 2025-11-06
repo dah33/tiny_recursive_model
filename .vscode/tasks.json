@@ -16,6 +16,11 @@
             }
         },
         {
+            "label": "Resume Training Model from Checkpoint",
+            "type": "shell",
+            "command": "uv run tiny_recursive_model/main.py fit --ckpt_path=lightning_logs/version_65/checkpoints/ --config=lightning_logs/version_65/config.yaml",
+        },
+        {
             "label": "Train Model (Fast Fail)",
             "type": "shell",
             "command": "uv run tiny_recursive_model/main.py fit --config config_base.yaml --config config_2060.yaml --trainer.fast_dev_run=true",

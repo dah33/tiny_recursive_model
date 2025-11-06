@@ -1,0 +1,20 @@
+{
+    "configurations": [
+        {
+            "type": "debugpy",
+            "request": "launch",
+            "name": "Debug TRM Training (Fast Dev Run)",
+            "program": "tiny_recursive_model/main.py",
+            "args": [
+                "fit",
+                "--config",
+                "config_base.yaml",
+                "--config",
+                "config_2060.yaml",
+                "--trainer.fast_dev_run=true"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ]
+}

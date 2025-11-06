@@ -65,8 +65,10 @@ data:
 optimizer:
   class_path: torch.optim.AdamW
   init_args:
-    lr: 1.0e-4
-    betas: [0.9, 0.95]
+    lr: 0.0001
+    betas: 
+    - 0.9
+    - 0.95
     eps: 1.0e-08
     weight_decay: 1.0 # high, as per paper
     amsgrad: false
@@ -81,6 +83,11 @@ optimizer:
 # warmup here.
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.LinearLR
+  init_args:
+    start_factor: 0.3333333333333333
+    end_factor: 1.0
+    total_iters: 5
+    last_epoch: -1
   # Uncomment to use paper's warmup settings
   # init_args:
   #     start_factor: 0.0005

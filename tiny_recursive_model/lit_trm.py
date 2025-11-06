@@ -193,8 +193,8 @@ class LitTRM(L.LightningModule):
             z = z[active]
             y_true = y_true[active]
 
-        avg_sup_steps = sample_count / batch_size * self.N_supervision
-        return y_hat, (final_loss, final_halt_loss, avg_sup_steps)
+        avg_sup = sample_count / batch_size * self.N_supervision
+        return y_hat, (final_loss, final_halt_loss, avg_sup)
 
     @torch.no_grad()
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
@@ -203,7 +203,12 @@ class LitTRM(L.LightningModule):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        _, (loss, halt_loss, avg_sup_steps) = self.forward(batch)
-        self.log("val_loss", loss, prog_bar=True)
+        y_hat, (loss, halt_loss, avg_sup) = self.forward(batch)
+        _, y_true, _ = batch.values()
+        cell_acc = (y_hat.argmax(dim=-1) == y_true).float().mean()
+        acc = (y_hat.argmax(dim=-1) == y_true).all(dim=-1).float().mean()
+        self.log("loss", loss, prog_bar=True)
         self.log("halt_loss", halt_loss)
-        self.log("avg_sup_steps", avg_sup_steps)
+        self.log("avg_sup", avg_sup)
+        self.log("cell_acc", cell_acc, prog_bar=True)
+        self.log("acc", acc, prog_bar=True)
