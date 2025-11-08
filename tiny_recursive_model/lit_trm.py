@@ -70,7 +70,7 @@ class LitTRM(L.LightningModule):
         halt_prob_threshold: float = 0.5,
         N_supervision: int = 16,
         # Training
-        batch_split: int = 1,
+        microbatch_count: int = 1,
     ):
         super().__init__()
         self.automatic_optimization = False
@@ -81,7 +81,7 @@ class LitTRM(L.LightningModule):
         # Hyperparameters used in training and forward
         self.halt_prob_threshold = halt_prob_threshold
         self.N_supervision = N_supervision
-        self.batch_split = batch_split
+        self.microbatch_count = microbatch_count
 
         self.model = TinyRecursiveModel(
             vocab_size=vocab_size,
@@ -125,7 +125,7 @@ class LitTRM(L.LightningModule):
         carry.supervision_count[replace] = 0
 
         # Single supervision step with microbatching
-        K = self.batch_split
+        K = self.microbatch_count
         y_acc, z_acc, halt_acc = [], [], []
         loss_acc, halt_loss_acc = 0.0, 0.0
 

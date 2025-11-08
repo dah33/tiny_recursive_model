@@ -10,4 +10,4 @@ model:
   T: 2
   n: 2
   N_supervision: 1
-  batch_split: 4
+  microbatch_count: 4
