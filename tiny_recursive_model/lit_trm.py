@@ -9,24 +9,6 @@ from torch.nn import functional as F
 from tiny_recursive_model.paper.model import TinyRecursiveModel
 
 
-def latent_recursion(net, x, y, z, n=6):  # all are (B, L, D)
-    # the network learns to refine the latents if input is passed in, otherwise it refines the output
-    for _ in range(n):  # latent reasoning
-        z = net(y + z + x)
-    y = net(y + z)  # refine output answer
-    return y, z
-
-
-def deep_recursion(net, output_head, Q_head, x, y, z, n=6, T=3):
-    # recursing T−1 times to improve y and z (no gradients needed)
-    with torch.no_grad():
-        for _ in range(T - 1):
-            y, z = latent_recursion(net, x, y, z, n)
-    # recursing T−1 times to improve y and z (no gradients needed)
-    y, z = latent_recursion(net, x, y, z, n)
-    return (y.detach(), z.detach()), output_head(y), Q_head(y)
-
-
 def softmax_cross_entropy(token_logits: Tensor, target_tokens: Tensor) -> Tensor:
     flat_logits = rearrange(token_logits, "B L D -> (B L) D")
     flat_target = rearrange(target_tokens, "B L -> (B L)")
@@ -156,7 +138,7 @@ class LitTRM(L.LightningModule):
         batch_size = x_input.shape[0]
         sample_count = 0
 
-        # No microbatches required
+        # No carry between supervision steps required
         for supervision_step in range(self.N_supervision):
             (y, z), y_hat, q_hat = self.model(x_input, y, z)
 
