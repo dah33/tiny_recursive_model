@@ -99,6 +99,9 @@ class LitTRM(L.LightningModule):
         self.carry = None
 
     def training_step(self, batch, batch_idx) -> Tensor:
+        # Manual optimization: https://lightning.ai/docs/pytorch/stable/model/manual_optimization.html
+        # Similar to TBPTT: https://lightning.ai/docs/pytorch/stable/common/tbptt.html
+
         opt, sch = self.optimizers(), self.lr_schedulers()
         x_input_fresh, y_true_fresh, puzzle_ids = batch.values()
 

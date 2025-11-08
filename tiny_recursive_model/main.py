@@ -13,8 +13,8 @@ from tiny_recursive_model.sudoku import SudokuDataModule
 # - higher learning rate
 #   - EMA - can use the Weighted callback built into Lightning (soon)
 #   - stablemax_cross_entropy loss function
-# - gpu utilisation: halted puzzles get replaced with fresh puzzles, so batch size is constant
 # - paper has loss + 0.5 * (halt_loss  + continue_loss), so loss + 0.5 * halt_loss
+
 
 def main():
     LightningCLI(LitTRM, SudokuDataModule)
