@@ -5,6 +5,7 @@
 #
 # For a fast fail, add this at command line:
 # > --trainer.fast_dev_run=true
+compile: false  # not beneficial with microbatching on small GPU
 model:
   n_layers: 2
   T: 2

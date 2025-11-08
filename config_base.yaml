@@ -4,6 +4,7 @@
 # > uv run tiny_recursive_model.main --config config_base.yaml
 #
 seed_everything: 42
+compile: true
 trainer:
   accelerator: auto
   strategy: auto
