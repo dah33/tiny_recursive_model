@@ -5,10 +5,13 @@
 #
 # For a fast fail, add this at command line:
 # > --trainer.fast_dev_run=true
-compile: false  # not beneficial with microbatching on small GPU
+compile: false  # not beneficial with gradient accumulation on small GPU
+trainer:
+  accumulate_grad_batches: 4  # Process 4×192=768 samples before optimizer step
+data:
+  batch_size: 192  # Smaller batches for 6GB VRAM
 model:
   n_layers: 2
   T: 2
   n: 2
   N_supervision: 1
-  microbatch_count: 4

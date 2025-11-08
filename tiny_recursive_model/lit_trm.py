@@ -73,7 +73,6 @@ class LitTRM(L.LightningModule):
         microbatch_count: int = 1,
     ):
         super().__init__()
-        self.automatic_optimization = False
 
         # Save for checkpointing
         self.save_hyperparameters()
@@ -96,17 +95,18 @@ class LitTRM(L.LightningModule):
         )
 
     def on_train_epoch_start(self):
-        self.carry = None
+        # Initialize one carry per gradient accumulation step
+        self.carries = [None] * self.trainer.accumulate_grad_batches
 
     def training_step(self, batch, batch_idx) -> Tensor:
-        # Manual optimization: https://lightning.ai/docs/pytorch/stable/model/manual_optimization.html
-        # Similar to TBPTT: https://lightning.ai/docs/pytorch/stable/common/tbptt.html
-
-        opt, sch = self.optimizers(), self.lr_schedulers()
         x_input_fresh, y_true_fresh, puzzle_ids = batch.values()
 
-        if self.carry is None:
-            self.carry = TrainingCarry(
+        # Determine which carry to use
+        carry_idx = batch_idx % self.trainer.accumulate_grad_batches
+
+        # Initialize carry on first use
+        if self.carries[carry_idx] is None:
+            self.carries[carry_idx] = TrainingCarry(
                 x_input=x_input_fresh,
                 y_true=y_true_fresh,
                 y=self.model.y_init(x_input_fresh),
@@ -115,8 +115,8 @@ class LitTRM(L.LightningModule):
                 completed=torch.zeros_like(puzzle_ids, dtype=torch.bool),
             )
 
-        # Replace completed
-        carry = self.carry
+        # Replace completed slots with fresh samples
+        carry = self.carries[carry_idx]
         replace = carry.completed
         carry.x_input[replace] = x_input_fresh[replace]
         carry.y_true[replace] = y_true_fresh[replace]
@@ -124,49 +124,29 @@ class LitTRM(L.LightningModule):
         carry.z[replace] = self.model.z_init(x_input_fresh[replace])
         carry.supervision_count[replace] = 0
 
-        # Single supervision step with microbatching
-        K = self.microbatch_count
-        y_acc, z_acc, halt_acc = [], [], []
-        loss_acc, halt_loss_acc = 0.0, 0.0
+        # Single supervision step
+        (y, z), y_hat, q_hat = self.model(carry.x_input, carry.y, carry.z)
+        pred_loss = softmax_cross_entropy(y_hat, carry.y_true)
+        halt_loss = binary_cross_entropy(q_hat, y_hat, carry.y_true)
+        loss = pred_loss + halt_loss
 
-        for x_input, y, z, y_true in zip(
-            carry.x_input.chunk(K),
-            carry.y.chunk(K),
-            carry.z.chunk(K),
-            carry.y_true.chunk(K),
-        ):
-            (y, z), y_hat, q_hat = self.model(x_input, y, z)
-            pred_loss = softmax_cross_entropy(y_hat, y_true)
-            halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
-            loss = pred_loss + halt_loss
-            self.manual_backward(loss / K)
+        halt = q_hat.detach() >= self.halt_prob_threshold
 
-            halt = q_hat.detach() >= self.halt_prob_threshold
-
-            y_acc.append(y)
-            z_acc.append(z)
-            halt_acc.append(halt)
-            loss_acc += loss.item() / K
-            halt_loss_acc += halt_loss.item() / K
-
-        opt.step()
-        opt.zero_grad()
-        sch.step()
-
-        # Update state
+        # Update carry state
         carry.supervision_count += 1
-        carry.y = torch.cat(y_acc, dim=0)
-        carry.z = torch.cat(z_acc, dim=0)
-        completed = torch.cat(halt_acc, dim=0)
-        completed |= carry.supervision_count >= self.N_supervision
+        carry.y = y
+        carry.z = z
+        completed = halt | (carry.supervision_count >= self.N_supervision)
         carry.completed = completed
 
         # Logging
-        self.log("loss", loss_acc, prog_bar=True)
-        self.log("halt_loss", halt_loss_acc, prog_bar=True)
+        self.log("loss", loss, prog_bar=True)
+        self.log("halt_loss", halt_loss, prog_bar=True)
         if completed.any():
             avg_sup = carry.supervision_count[completed].float().mean()
             self.log("avg_sup", avg_sup, prog_bar=True)
+
+        return loss
 
     def forward(self, batch):
         x_input, y_true, puzzle_ids = batch.values()
