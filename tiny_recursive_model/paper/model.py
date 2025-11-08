@@ -135,6 +135,16 @@ class TinyRecursiveModel(nn.Module):
         self.pred_head = PredHead(D, vocab_size, scratch_slots, bias=False)
         self.halt_head = HaltHead(D, scratch_slot=0, bias=True)
 
+    def y_init(self, x_input: torch.Tensor) -> torch.Tensor:
+        """Initialize y hidden state to zeros with same shape as embedded input."""
+        x = self.embed_input(x_input)
+        return torch.zeros_like(x)
+
+    def z_init(self, x_input: torch.Tensor) -> torch.Tensor:
+        """Initialize z hidden state to zeros with same shape as embedded input."""
+        x = self.embed_input(x_input)
+        return torch.zeros_like(x)
+
     def embed_input(self, x_input: torch.Tensor) -> torch.Tensor:
         # Apply embedding scaling to match original TRM implementation
         token_embeddings = self.embed_scale * self.input_embedding(x_input)
@@ -149,8 +159,8 @@ class TinyRecursiveModel(nn.Module):
     ):
         # caller should do the N_supervision looping
         x = self.embed_input(x_input)
-        y = y if y is not None else torch.zeros_like(x)
-        z = z if z is not None else torch.zeros_like(x)
+        y = y if y is not None else self.y_init(x_input)
+        z = z if z is not None else self.z_init(x_input)
         return deep_recursion(
             self.model,
             self.pred_head,

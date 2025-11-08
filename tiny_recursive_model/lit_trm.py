@@ -1,6 +1,8 @@
+from dataclasses import dataclass
+
 import lightning as L
 import torch
-from einops import rearrange, reduce
+from einops import rearrange
 from torch import Tensor
 from torch.nn import functional as F
 
@@ -38,6 +40,16 @@ def binary_cross_entropy(
     is_seq_correct = (token_logits.argmax(dim=-1) == target_tokens).all(dim=-1)
     target = is_seq_correct.to(dtype=halt_logits.dtype)
     return F.binary_cross_entropy_with_logits(halt_logits, target)  # mean over batch
+
+
+@dataclass
+class TrainingCarry:
+    x_input: Tensor
+    y: Tensor
+    z: Tensor
+    y_true: Tensor
+    supervision_count: Tensor
+    completed: Tensor  # Boolean mask
 
 
 class LitTRM(L.LightningModule):
@@ -83,82 +95,75 @@ class LitTRM(L.LightningModule):
             T=T,
         )
 
+    def on_train_epoch_start(self):
+        self.carry = None
+
     def training_step(self, batch, batch_idx) -> Tensor:
-        # Manual optimization: https://lightning.ai/docs/pytorch/stable/model/manual_optimization.html
-        # Similar to TBPTT: https://lightning.ai/docs/pytorch/stable/common/tbptt.html
-
         opt, sch = self.optimizers(), self.lr_schedulers()
+        x_input_fresh, y_true_fresh, puzzle_ids = batch.values()
 
-        # Reuse the same batch for N_supervision steps (batch may shrink due to halting)
-        x_input_batch, y_true_batch, puzzle_ids = batch.values()
-        y_batch, z_batch = None, None  # initial hiddens created by model
-        halt_batch = torch.zeros_like(puzzle_ids, dtype=torch.bool)
-        final_loss, final_halt_loss = 0.0, 0.0
-        batch_size = x_input_batch.shape[0]
-        sample_count = 0
+        if self.carry is None:
+            self.carry = TrainingCarry(
+                x_input=x_input_fresh,
+                y_true=y_true_fresh,
+                y=self.model.y_init(x_input_fresh),
+                z=self.model.z_init(x_input_fresh),
+                supervision_count=torch.zeros_like(puzzle_ids, dtype=torch.long),
+                completed=torch.zeros_like(puzzle_ids, dtype=torch.bool),
+            )
 
-        for supervision_step in range(self.N_supervision):
+        # Replace completed
+        carry = self.carry
+        replace = carry.completed
+        carry.x_input[replace] = x_input_fresh[replace]
+        carry.y_true[replace] = y_true_fresh[replace]
+        carry.y[replace] = self.model.y_init(x_input_fresh[replace])
+        carry.z[replace] = self.model.z_init(x_input_fresh[replace])
+        carry.supervision_count[replace] = 0
 
-            # Accumulate gradients over K microbatches
-            K = self.batch_split
-            y_acc, z_acc, halt_acc = [], [], []
-            loss_acc, halt_loss_acc = 0.0, 0.0
-            for x_input, y, z, y_true, halt in zip(
-                x_input_batch.chunk(K),
-                y_batch.chunk(K) if y_batch is not None else [None] * K,
-                z_batch.chunk(K) if z_batch is not None else [None] * K,
-                y_true_batch.chunk(K),
-                halt_batch.chunk(K),
-            ):
-                # Deep recursion step
-                (y, z), y_hat, q_hat = self.model(x_input, y, z)
-                pred_loss = softmax_cross_entropy(y_hat, y_true)
-                halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
-                loss = pred_loss + halt_loss
-                self.manual_backward(loss / K)  # accumulate over K microbatches
+        # Single supervision step with microbatching
+        K = self.batch_split
+        y_acc, z_acc, halt_acc = [], [], []
+        loss_acc, halt_loss_acc = 0.0, 0.0
 
-                # Should we halt supervision for each puzzle?
-                halt = q_hat.detach() >= self.halt_prob_threshold
+        for x_input, y, z, y_true in zip(
+            carry.x_input.chunk(K),
+            carry.y.chunk(K),
+            carry.z.chunk(K),
+            carry.y_true.chunk(K),
+        ):
+            (y, z), y_hat, q_hat = self.model(x_input, y, z)
+            pred_loss = softmax_cross_entropy(y_hat, y_true)
+            halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
+            loss = pred_loss + halt_loss
+            self.manual_backward(loss / K)
 
-                # Accumulate microbatch results
-                y_acc.append(y)
-                z_acc.append(z)
-                halt_acc.append(halt)
-                loss_acc += loss.item() / K
-                halt_loss_acc += halt_loss.item() / K
-                sample_count += x_input.shape[0]
+            halt = q_hat.detach() >= self.halt_prob_threshold
 
-            # Optimize based on accumulated gradients for full batch
-            opt.step()
-            opt.zero_grad()
-            sch.step()
+            y_acc.append(y)
+            z_acc.append(z)
+            halt_acc.append(halt)
+            loss_acc += loss.item() / K
+            halt_loss_acc += halt_loss.item() / K
 
-            # Combine microbatch results
-            y_batch = torch.cat(y_acc, dim=0)
-            z_batch = torch.cat(z_acc, dim=0)
-            halt_batch = torch.cat(halt_acc, dim=0)
+        opt.step()
+        opt.zero_grad()
+        sch.step()
 
-            # Accumulate losses if at final supervision step
-            is_final_step = halt_batch | (supervision_step == self.N_supervision - 1)
-            final_loss += loss_acc * is_final_step.sum() / batch_size
-            final_halt_loss += halt_loss_acc * is_final_step.sum() / batch_size
+        # Update state
+        carry.supervision_count += 1
+        carry.y = torch.cat(y_acc, dim=0)
+        carry.z = torch.cat(z_acc, dim=0)
+        completed = torch.cat(halt_acc, dim=0)
+        completed |= carry.supervision_count >= self.N_supervision
+        carry.completed = completed
 
-            # Early stopping if all puzzles have halted
-            if halt_batch.all():
-                break
-
-            # Keep only active puzzles for next supervision step
-            active = ~halt_batch
-            x_input_batch = x_input_batch[active]
-            y_batch = y_batch[active]
-            z_batch = z_batch[active]
-            y_true_batch = y_true_batch[active]
-
-        # Log batch metrics
-        avg_sup_steps = sample_count / batch_size * self.N_supervision
-        self.log("loss", final_loss, on_step=True, prog_bar=True)
-        self.log("halt_loss", final_halt_loss, on_step=True, prog_bar=True)
-        self.log("avg_sup", avg_sup_steps, on_step=True, prog_bar=True)
+        # Logging
+        self.log("loss", loss_acc, prog_bar=True)
+        self.log("halt_loss", halt_loss_acc, prog_bar=True)
+        if completed.any():
+            avg_sup = carry.supervision_count[completed].float().mean()
+            self.log("avg_sup", avg_sup, prog_bar=True)
 
     def forward(self, batch):
         x_input, y_true, puzzle_ids = batch.values()
@@ -174,15 +179,15 @@ class LitTRM(L.LightningModule):
 
             pred_loss = softmax_cross_entropy(y_hat, y_true)
             halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
-            loss = (pred_loss + halt_loss).item()
+            loss = pred_loss + halt_loss
             sample_count += x_input.shape[0]
 
             halt = q_hat >= self.halt_prob_threshold
 
             # Accumulate losses if at final supervision step
             is_final_step = halt | (supervision_step == self.N_supervision - 1)
-            final_loss += loss * is_final_step.sum() / batch_size
-            final_halt_loss += halt_loss * is_final_step.sum() / batch_size
+            final_loss += loss.item() * is_final_step.sum() / batch_size
+            final_halt_loss += halt_loss.item() * is_final_step.sum() / batch_size
 
             if halt.all():
                 break
