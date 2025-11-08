@@ -86,6 +86,7 @@ class TinyRecursiveModel(nn.Module):
         rms_norm_eps: float = 1e-5,
         n: int = 6,
         T: int = 3,
+        use_checkpointing: bool = False,
     ) -> None:
         super().__init__()
 
@@ -130,6 +131,15 @@ class TinyRecursiveModel(nn.Module):
             for _ in range(n_layers)
         ]
         self.model = nn.Sequential(*layers)
+        
+        # Optionally wrap with gradient checkpointing
+        if use_checkpointing:
+            from torch.utils.checkpoint import checkpoint_sequential
+            self.model = checkpoint_sequential(
+                self.model,
+                segments=n_layers,
+                use_reentrant=False,
+            )
 
         # Output heads
         self.pred_head = PredHead(D, vocab_size, scratch_slots, bias=False)

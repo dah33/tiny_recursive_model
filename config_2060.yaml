@@ -1,17 +1,26 @@
 # lightning.pytorch==2.5.5
 #
-# Smaller model and batches for RTX 2060 (6GB):
-# > uv run tiny_recursive_model.main --config config_base.yaml --config config_2060.yaml
+# Reduced config for RTX 2060 (6GB VRAM):
+# > uv run python -m tiny_recursive_model.main fit --config config_base.yaml --config config_2060.yaml
 #
-# For a fast fail, add this at command line:
+# Fast fail mode for testing:
 # > --trainer.fast_dev_run=true
-compile: false  # not beneficial with gradient accumulation on small GPU
+#
+# Memory usage on RTX 2060 with batch_size=192, accumulate_grad_batches=4:
+# - n=2, reduce_memory=false: ~3.9 GB peak (fast, ~1.0 it/s)
+# - n=3, reduce_memory=true:  ~4.9 GB peak (slower, ~0.70 it/s, OOMs without checkpointing)
+# - n=4, reduce_memory=true:  ~4.9 GB peak (slower, ~0.69 it/s, OOMs without checkpointing)
+# - n=5, reduce_memory=true:  OOM (even with checkpointing)
+# - n=6, reduce_memory=true:  OOM (paper's value, requires larger GPU)
+#
+compile: false  # No benefit with this setup
 trainer:
   accumulate_grad_batches: 4  # Process 4×192=768 samples before optimizer step
 data:
   batch_size: 192  # Smaller batches for 6GB VRAM
 model:
   n_layers: 2
-  T: 2
-  n: 2
-  N_supervision: 1
+  T: 2  # Paper uses T=3, which doesn't increase memory but slows training
+  n: 2  # Paper uses n=6, see table above for memory usage
+  N_supervision: 1  # Paper uses 16, which doesn't increase memory
+  reduce_memory: false  # Set to true for n≥3 to enable activation checkpointing

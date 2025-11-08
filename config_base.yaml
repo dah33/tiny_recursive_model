@@ -58,6 +58,7 @@ model:
   n: 6
   halt_prob_threshold: 0.5
   N_supervision: 16
+  reduce_memory: false
 data:
   root_dir: data/sudoku-extreme-1k-aug-1000
   batch_size: 768
