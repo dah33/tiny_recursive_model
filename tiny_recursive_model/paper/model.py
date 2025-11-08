@@ -11,10 +11,12 @@ Use with PyTorch AMP for mixed precision training.
 """
 
 import math
+from functools import partial
 
 import torch
 from einops import repeat
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 from tiny_recursive_model.paper.initialisers import trunc_normal_init_
 from tiny_recursive_model.paper.mixer import MixerLayer
@@ -86,7 +88,7 @@ class TinyRecursiveModel(nn.Module):
         rms_norm_eps: float = 1e-5,
         n: int = 6,
         T: int = 3,
-        use_checkpointing: bool = False,
+        activation_checkpointing: bool = False,
     ) -> None:
         super().__init__()
 
@@ -131,15 +133,7 @@ class TinyRecursiveModel(nn.Module):
             for _ in range(n_layers)
         ]
         self.model = nn.Sequential(*layers)
-        
-        # Optionally wrap with gradient checkpointing
-        if use_checkpointing:
-            from torch.utils.checkpoint import checkpoint_sequential
-            self.model = checkpoint_sequential(
-                self.model,
-                segments=n_layers,
-                use_reentrant=False,
-            )
+        self.activation_checkpointing = activation_checkpointing
 
         # Output heads
         self.pred_head = PredHead(D, vocab_size, scratch_slots, bias=False)
@@ -167,12 +161,18 @@ class TinyRecursiveModel(nn.Module):
         y: torch.Tensor | None = None,
         z: torch.Tensor | None = None,
     ):
-        # caller should do the N_supervision looping
+        # Caller should do the N_supervision looping
         x = self.embed_input(x_input)
         y = y if y is not None else self.y_init(x_input)
         z = z if z is not None else self.z_init(x_input)
+
+        # Use activation checkpointing to reduce memory usage during training
+        net = self.model
+        if self.activation_checkpointing and self.training:
+            net = partial(checkpoint, net, use_reentrant=False)
+
         return deep_recursion(
-            self.model,
+            net,
             self.pred_head,
             self.halt_head,
             x,

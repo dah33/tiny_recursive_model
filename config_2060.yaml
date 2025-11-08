@@ -7,11 +7,8 @@
 # > --trainer.fast_dev_run=true
 #
 # Memory usage on RTX 2060 with batch_size=192, accumulate_grad_batches=4:
-# - n=2, reduce_memory=false: ~3.9 GB peak (fast, ~1.0 it/s)
-# - n=3, reduce_memory=true:  ~4.9 GB peak (slower, ~0.70 it/s, OOMs without checkpointing)
-# - n=4, reduce_memory=true:  ~4.9 GB peak (slower, ~0.69 it/s, OOMs without checkpointing)
-# - n=5, reduce_memory=true:  OOM (even with checkpointing)
-# - n=6, reduce_memory=true:  OOM (paper's value, requires larger GPU)
+# - n=2, activation_checkpointing=false: ~4.9 GB, ~1.0 it/s
+# - n=3-6, activation_checkpointing=true: ~5.1 GB, ~0.75-0.63 it/s (OOMs without checkpointing)
 #
 compile: false  # No benefit with this setup
 trainer:
@@ -21,6 +18,6 @@ data:
 model:
   n_layers: 2
   T: 2  # Paper uses T=3, which doesn't increase memory but slows training
-  n: 2  # Paper uses n=6, see table above for memory usage
-  N_supervision: 1  # Paper uses 16, which doesn't increase memory
-  reduce_memory: false  # Set to true for n≥3 to enable activation checkpointing
+  n: 2  # Paper uses n=6, see above re memory usage
+  N_supervision: 1  # Paper uses 16, which doesn't increase memory but slows training
+  activation_checkpointing: false  # Set to true for n=3-6 (saves memory but slows training)

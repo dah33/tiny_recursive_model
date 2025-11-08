@@ -32,7 +32,6 @@ class TorchCompileCLI(LightningCLI):
 
 
 # TODO:
-# - reduce duplication in train_step and forward
 # - With 10% probability (halt_exploration_prob: 0.1), the model is forced to continue for a random number of steps (2 to 16)
 #   - min_halt_steps = (rand() < 0.1) * randint(2, 16)
 #   - halted = halted & (steps >= min_halt_steps)

@@ -51,7 +51,7 @@ class LitTRM(L.LightningModule):
         n: int = 6,
         halt_prob_threshold: float = 0.5,
         N_supervision: int = 16,
-        reduce_memory: bool = False,
+        activation_checkpointing: bool = False,
     ):
         super().__init__()
 
@@ -61,7 +61,7 @@ class LitTRM(L.LightningModule):
         # Hyperparameters used in training and forward
         self.halt_prob_threshold = halt_prob_threshold
         self.N_supervision = N_supervision
-        self.reduce_memory = reduce_memory
+        self.activation_checkpointing = activation_checkpointing
 
         self.model = TinyRecursiveModel(
             vocab_size=vocab_size,
@@ -73,7 +73,7 @@ class LitTRM(L.LightningModule):
             rms_norm_eps=rms_norm_eps,
             n=n,
             T=T,
-            use_checkpointing=reduce_memory,
+            activation_checkpointing=activation_checkpointing,
         )
 
     def on_train_epoch_start(self):
