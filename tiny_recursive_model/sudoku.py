@@ -3,8 +3,9 @@ from pathlib import Path
 import lightning as L
 import numpy as np
 import torch
-from metadata import load_metadata
 from torch.utils.data import DataLoader, Dataset, random_split
+
+from tiny_recursive_model.metadata import load_metadata
 
 # Parameters from original TRM implementation for posterity
 #
@@ -132,6 +133,7 @@ class SudokuDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
+            drop_last=True,  # fixed batch size for torch.compile
         )
 
     def val_dataloader(self):
@@ -140,6 +142,7 @@ class SudokuDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            drop_last=True,  # fixed batch size for torch.compile
         )
 
     def test_dataloader(self):
@@ -148,6 +151,7 @@ class SudokuDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            drop_last=False,  # allow smaller final batch in test
         )
 
     def predict_dataloader(self):

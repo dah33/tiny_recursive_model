@@ -1,7 +1,24 @@
+import logging
+import warnings
+
+import torch
 from lightning.pytorch.cli import LightningCLI
 
 from tiny_recursive_model.lit_trm import LitTRM
 from tiny_recursive_model.sudoku import SudokuDataModule
+
+
+class TorchCompileCLI(LightningCLI):
+    def fit(self, model, **kwargs):
+        # Suppress expected warnings related to torch.compile:
+        warnings.filterwarnings("ignore", message=".*does not support bfloat16 compilation natively.*")
+        warnings.filterwarnings("ignore", message=".*functools.lru_cache.*")
+        logging.getLogger("torch._dynamo").setLevel(logging.ERROR)
+        logging.getLogger("torch._inductor").setLevel(logging.ERROR)
+        
+        compiled_model = torch.compile(model)
+        self.trainer.fit(compiled_model, **kwargs)
+
 
 # TODO:
 # - activation checkpointing to save memory (reduce_memory parameter)
@@ -15,9 +32,8 @@ from tiny_recursive_model.sudoku import SudokuDataModule
 #   - stablemax_cross_entropy loss function
 # - paper has loss + 0.5 * (halt_loss  + continue_loss), so loss + 0.5 * halt_loss
 
-
 def main():
-    LightningCLI(LitTRM, SudokuDataModule)
+    TorchCompileCLI(LitTRM, SudokuDataModule)
 
 
 if __name__ == "__main__":
