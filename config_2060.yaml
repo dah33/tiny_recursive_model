@@ -13,6 +13,7 @@
 compile: false  # No benefit with this setup
 trainer:
   accumulate_grad_batches: 4  # Process 4×192=768 samples before optimizer step
+  val_check_interval:
 data:
   batch_size: 192  # Smaller batches for 6GB VRAM
 model:
@@ -21,3 +22,9 @@ model:
   n: 2  # Paper uses n=6, see above re memory usage
   N_supervision: 1  # Paper uses 16, which doesn't increase memory but slows training
   activation_checkpointing: false  # Set to true for n=3-6 (saves memory but slows training)
+lr_scheduler:
+  init_args: # LinearLR defaults
+    start_factor: 0.3333333333333333
+    end_factor: 1.0
+    total_iters: 5
+    last_epoch: -1

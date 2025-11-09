@@ -24,7 +24,7 @@ trainer:
   limit_test_batches: null
   limit_predict_batches: null
   overfit_batches: 0.0
-  val_check_interval: 100
+  val_check_interval: null
   check_val_every_n_epoch: null
   num_sanity_val_steps: null
   log_every_n_steps: 1
@@ -78,20 +78,11 @@ optimizer:
     capturable: false
     differentiable: false
     fused: null
-# Warmup: Paper uses a gentle 2000-step warmup with 768 batch size = ~1.5 epochs
-# over 1m samples = ~1.5k iterations over 1k unique puzzles. The optimizer
-# behaves stably without warmup on Sudoku, so we use a short 5-step default
-# warmup here.
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.LinearLR
   init_args:
-    start_factor: 0.3333333333333333
+    # ~1.5 epochs: ~1.5k iterations over 1k unique puzzles
+    start_factor: 0.0005
     end_factor: 1.0
-    total_iters: 5
+    total_iters: 1999
     last_epoch: -1
-  # Uncomment to use paper's warmup settings
-  # init_args:
-  #     start_factor: 0.0005
-  #     end_factor: 1.0
-  #     total_iters: 1999
-  #     last_epoch: -1
