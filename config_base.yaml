@@ -81,8 +81,9 @@ optimizer:
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.LinearLR
   init_args:
-    # ~1.5 epochs: ~1.5k iterations over 1k unique puzzles
-    start_factor: 0.0005
+    # Paper = 2000 steps x 768 samples = 1.5M samples = ~1.5 epochs
+    # Approximate here with 0.333, 0.666 over first 2 epochs
+    start_factor: 0.333
     end_factor: 1.0
-    total_iters: 1999
+    total_iters: 2 # epochs, as Lightning CLI doesn't support interval='step'
     last_epoch: -1

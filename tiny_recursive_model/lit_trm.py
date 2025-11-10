@@ -124,6 +124,8 @@ class LitTRM(L.LightningModule):
         # Logging
         self.log("loss", loss, prog_bar=True)
         self.log("halt_loss", halt_loss, prog_bar=True)
+        lr = self.trainer.optimizers[0].param_groups[0]["lr"]
+        self.log("lr", lr, prog_bar=True)
         if completed.any():
             avg_sup = carry.supervision_count[completed].float().mean()
             self.log("avg_sup", avg_sup, prog_bar=True)

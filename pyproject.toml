@@ -15,7 +15,7 @@ dependencies = [
     "pydantic>=2.12.3",
     "tensorboard>=2.20.0",
     "torch>=2.4",
-    "jsonargparse>=4.42",
+    "jsonargparse[signatures]>=4.42",
 ]
 
 [build-system]
