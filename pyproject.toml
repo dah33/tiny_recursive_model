@@ -11,10 +11,11 @@ dependencies = [
     "einops>=0.8.1",
     "ema-pytorch",
     "huggingface-hub>=1.1.2",
-    "lightning[extra]>=2.5.5",
+    "lightning>=2.5.5",
     "pydantic>=2.12.3",
     "tensorboard>=2.20.0",
     "torch>=2.4",
+    "jsonargparse>=4.42",
 ]
 
 [build-system]
