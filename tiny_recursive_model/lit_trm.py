@@ -139,6 +139,7 @@ class LitTRM(L.LightningModule):
         final_loss, final_halt_loss = 0.0, 0.0
         batch_size = x_input.shape[0]
         sample_count = 0
+        y_hat_final = y_hat_active = None
 
         # No carry between supervision steps required
         for supervision_step in range(self.N_supervision):
@@ -156,6 +157,12 @@ class LitTRM(L.LightningModule):
             final_loss += loss.item() * is_final_step.sum() / batch_size
             final_halt_loss += halt_loss.item() * is_final_step.sum() / batch_size
 
+            # Save predictions: full final output and active subset view
+            if y_hat_active is None:
+                y_hat_final = y_hat_active = y_hat
+            else:
+                y_hat_active[:] = y_hat
+
             if halt.all():
                 break
 
@@ -164,9 +171,10 @@ class LitTRM(L.LightningModule):
             y = y[active]
             z = z[active]
             y_true = y_true[active]
+            y_hat_active = y_hat_active[active]
 
         avg_sup = sample_count / batch_size * self.N_supervision
-        return y_hat, (final_loss, final_halt_loss, avg_sup)
+        return y_hat_final, (final_loss, final_halt_loss, avg_sup)
 
     @torch.no_grad()
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
