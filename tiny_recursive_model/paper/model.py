@@ -30,23 +30,23 @@ def latent_recursion(net, x, y, z, n=6):  # all are (B, L, D)
     return y, z
 
 
-def deep_recursion(net, output_head, Q_head, x, y, z, n=6, T=3):
+def deep_recursion(net, pred_head, halt_head, x, y, z, n=6, T=3):
     # recursing T−1 times to improve y and z (no gradients needed)
     with torch.no_grad():
         for _ in range(T - 1):
             y, z = latent_recursion(net, x, y, z, n)
     # recursing T−1 times to improve y and z (no gradients needed)
     y, z = latent_recursion(net, x, y, z, n)
-    return (y.detach(), z.detach()), output_head(y), Q_head(y)
+    return (y.detach(), z.detach()), pred_head(y), halt_head(y)
 
 
 class HaltHead(nn.Module):
-    """Predicts halt from the first position (a scratch slot)."""
+    """Predicts halt from the first position (a scratchpad slot)."""
 
-    def __init__(self, in_features, scratch_slot=0, bias=True):
+    def __init__(self, in_features, scratchpad_idx=0, bias=True):
         super().__init__()
         self.linear = nn.Linear(in_features, 1, bias=bias)
-        self.scratch_slot = scratch_slot
+        self.scratchpad_idx = scratchpad_idx
 
         # Initialize to encourage thinking (not halting early)
         nn.init.zeros_(self.linear.weight)
@@ -55,16 +55,16 @@ class HaltHead(nn.Module):
         #   Starting at -5 biases model to NOT halt initially (encourages more thinking)
 
     def forward(self, x):
-        return self.linear(x[:, self.scratch_slot, :]).squeeze(-1)
+        return self.linear(x[:, self.scratchpad_idx, :]).squeeze(-1)
 
 
 class PredHead(nn.Module):
-    """Prediction head that removes scratch slots from output."""
+    """Prediction head that removes scratchpad from output."""
 
-    def __init__(self, in_features, vocab_size, scratch_slots, bias=False):
+    def __init__(self, in_features, vocab_size, n_scratchpad, bias=False):
         super().__init__()
         self.linear = nn.Linear(in_features, vocab_size, bias=bias)
-        self.scratch_slots = scratch_slots
+        self.n_scratchpad = n_scratchpad
 
         # Initialize with truncated normal
         trunc_normal_init_(self.linear.weight, std=1.0 / math.sqrt(in_features))
@@ -73,7 +73,7 @@ class PredHead(nn.Module):
 
     def forward(self, x):
         logits = self.linear(x)
-        return logits[:, self.scratch_slots :]
+        return logits[:, self.n_scratchpad :]
 
 
 class TinyRecursiveModel(nn.Module):
@@ -82,7 +82,7 @@ class TinyRecursiveModel(nn.Module):
         vocab_size: int = 11,
         D: int = 512,
         L: int = 81,
-        scratch_slots: int = 16,
+        n_scratchpad: int = 16,
         n_layers: int = 2,
         expansion_factor: float = 4.0,
         rms_norm_eps: float = 1e-5,
@@ -95,12 +95,15 @@ class TinyRecursiveModel(nn.Module):
         self.vocab_size = vocab_size
         self.D = D
         self.L = L
-        self.scratch_slots = scratch_slots
+        self.n_scratchpad = n_scratchpad
         self.n_layers = n_layers
         self.expansion_factor = expansion_factor
         self.rms_norm_eps = rms_norm_eps
         self.n = n
         self.T = T
+
+        # Precalculate total sequence length for y_init and z_init
+        self.total_seq_len = n_scratchpad + L
 
         # Embeddings
         self.input_embedding = nn.Embedding(vocab_size, D)
@@ -110,14 +113,14 @@ class TinyRecursiveModel(nn.Module):
         # - This scales embeddings by sqrt(D) to balance gradient magnitudes and
         #   maintain variance ~1 consistent with other layers (Xavier/He init).
         # - TODO: May be redundant with Adam optimizer + RMSNorm
-        self.embed_scale = math.sqrt(D)
-        trunc_normal_init_(self.input_embedding.weight, std=1.0 / self.embed_scale)
+        self.embedding_scale = math.sqrt(D)
+        trunc_normal_init_(self.input_embedding.weight, std=1.0 / self.embedding_scale)
         # PyTorch default: nn.Embedding uses N(0, 1) - much larger std than 1/sqrt(D)≈0.044
 
-        # Learnable scratch pad values
-        # - First scratch slot is used by halt_head for early stopping decision
+        # Learnable scratchpad values
+        # - First scratchpad slot is used by halt_head for early stopping decision
         # - Initialized to zeros; could also use small random values
-        self.scratch_init = nn.Parameter(torch.zeros(scratch_slots, D))
+        self.scratchpad = nn.Parameter(torch.zeros(n_scratchpad, D))
         # Typical: Learnable embeddings like this are usually initialised with
         #   small random values e.g., N(0, 0.02) like BERT positional
         #   embeddings
@@ -125,7 +128,7 @@ class TinyRecursiveModel(nn.Module):
         # Main model
         layers = [
             MixerLayer(
-                seq_len=L + scratch_slots,
+                seq_len=self.total_seq_len,
                 hidden_size=D,
                 expansion_factor=expansion_factor,
                 rms_norm_eps=rms_norm_eps,
@@ -136,24 +139,23 @@ class TinyRecursiveModel(nn.Module):
         self.activation_checkpointing = activation_checkpointing
 
         # Output heads
-        self.pred_head = PredHead(D, vocab_size, scratch_slots, bias=False)
-        self.halt_head = HaltHead(D, scratch_slot=0, bias=True)
+        self.pred_head = PredHead(D, vocab_size, n_scratchpad, bias=False)
+        self.halt_head = HaltHead(D, scratchpad_idx=0, bias=True)
 
-    def y_init(self, x_input: torch.Tensor) -> torch.Tensor:
-        """Initialize y hidden state to zeros with same shape as embedded input."""
-        x = self.embed_input(x_input)
-        return torch.zeros_like(x)
+    def y_init(self, batch_size: int) -> torch.Tensor:
+        """Initialize y hidden state to zeros with shape (B, L, D)."""
+        return torch.zeros(
+            batch_size, self.total_seq_len, self.D, device=self.scratchpad.device
+        )
 
-    def z_init(self, x_input: torch.Tensor) -> torch.Tensor:
-        """Initialize z hidden state to zeros with same shape as embedded input."""
-        x = self.embed_input(x_input)
-        return torch.zeros_like(x)
+    def z_init(self, batch_size: int) -> torch.Tensor:
+        return self.y_init(batch_size)  # same shape as y
 
     def embed_input(self, x_input: torch.Tensor) -> torch.Tensor:
         # Apply embedding scaling to match original TRM implementation
-        token_embeddings = self.embed_scale * self.input_embedding(x_input)
-        scratch_inits = repeat(self.scratch_init, "L D -> B L D", B=x_input.shape[0])
-        return torch.cat([scratch_inits, token_embeddings], dim=1)
+        token_embeddings = self.embedding_scale * self.input_embedding(x_input)
+        scratchpad = self.scratchpad.expand(x_input.size(0), -1, -1)
+        return torch.cat([scratchpad, token_embeddings], dim=1)
 
     def forward(
         self,
@@ -163,8 +165,9 @@ class TinyRecursiveModel(nn.Module):
     ):
         # Caller should do the N_supervision looping
         x = self.embed_input(x_input)
-        y = y if y is not None else self.y_init(x_input)
-        z = z if z is not None else self.z_init(x_input)
+        batch_size = x_input.size(0)
+        y = y if y is not None else self.y_init(batch_size)
+        z = z if z is not None else self.z_init(batch_size)
 
         # Use activation checkpointing to reduce memory usage during training
         net = self.model

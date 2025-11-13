@@ -67,7 +67,7 @@ class LitTRM(L.LightningModule):
             vocab_size=vocab_size,
             D=D,
             L=L,
-            scratch_slots=scratch_slots,
+            n_scratchpad=scratch_slots,
             n_layers=n_layers,
             expansion_factor=expansion_factor,
             rms_norm_eps=rms_norm_eps,
@@ -91,10 +91,8 @@ class LitTRM(L.LightningModule):
             self.carry[carry_idx] = TrainingCarry(
                 x_input=x_input,
                 y_true=y_true,
-                # Possibly a problem with detach here?
-                # Not that keen on the way i init
-                y=self.model.y_init(x_input),
-                z=self.model.z_init(x_input),
+                y=self.model.y_init(x_input.size(0)),
+                z=self.model.z_init(x_input.size(0)),
                 supervision_count=torch.zeros_like(puzzle_ids, dtype=torch.long),
                 completed=torch.zeros_like(puzzle_ids, dtype=torch.bool),
             )
@@ -104,9 +102,10 @@ class LitTRM(L.LightningModule):
         replace = carry.completed
         carry.x_input[replace] = x_input[replace]
         carry.y_true[replace] = y_true[replace]
-        carry.y[replace] = self.model.y_init(x_input[replace])
-        carry.z[replace] = self.model.z_init(x_input[replace])
+        carry.y[replace] = self.model.y_init(x_input[replace].size(0))
+        carry.z[replace] = self.model.z_init(x_input[replace].size(0))
         carry.supervision_count[replace] = 0
+        carry.completed[replace] = False
 
         # Single supervision step
         (y, z), y_hat, q_hat = self.model(carry.x_input, carry.y, carry.z)
@@ -116,12 +115,12 @@ class LitTRM(L.LightningModule):
         halt = q_hat.detach() >= self.halt_prob_threshold
 
         # Update carry state
-        carry.supervision_count += 1
         carry.y = y
         carry.z = z
+        carry.supervision_count += 1
         carry.completed = halt | (carry.supervision_count >= self.N_supervision)
 
-        # Logging - no need, just return! TODO
+        # Logging
         self.log("loss", loss, prog_bar=True)
         self.log("halt_loss", halt_loss, prog_bar=True)
         lr = self.trainer.optimizers[0].param_groups[0]["lr"]
