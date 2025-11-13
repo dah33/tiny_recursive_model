@@ -78,32 +78,34 @@ class LitTRM(L.LightningModule):
 
     def on_train_epoch_start(self):
         # Initialize one carry per gradient accumulation step
-        self.carries = [None] * self.trainer.accumulate_grad_batches
+        self.carry = [None] * self.trainer.accumulate_grad_batches
 
     def training_step(self, batch, batch_idx) -> Tensor:
-        x_input_fresh, y_true_fresh, puzzle_ids = batch.values()
+        x_input, y_true, puzzle_ids = batch.values()
 
         # Determine which carry to use
         carry_idx = batch_idx % self.trainer.accumulate_grad_batches
 
         # Initialize carry on first use
-        if self.carries[carry_idx] is None:
-            self.carries[carry_idx] = TrainingCarry(
-                x_input=x_input_fresh,
-                y_true=y_true_fresh,
-                y=self.model.y_init(x_input_fresh),
-                z=self.model.z_init(x_input_fresh),
+        if self.carry[carry_idx] is None:
+            self.carry[carry_idx] = TrainingCarry(
+                x_input=x_input,
+                y_true=y_true,
+                # Possibly a problem with detach here?
+                # Not that keen on the way i init
+                y=self.model.y_init(x_input),
+                z=self.model.z_init(x_input),
                 supervision_count=torch.zeros_like(puzzle_ids, dtype=torch.long),
                 completed=torch.zeros_like(puzzle_ids, dtype=torch.bool),
             )
 
         # Replace completed slots with fresh samples
-        carry = self.carries[carry_idx]
+        carry = self.carry[carry_idx]
         replace = carry.completed
-        carry.x_input[replace] = x_input_fresh[replace]
-        carry.y_true[replace] = y_true_fresh[replace]
-        carry.y[replace] = self.model.y_init(x_input_fresh[replace])
-        carry.z[replace] = self.model.z_init(x_input_fresh[replace])
+        carry.x_input[replace] = x_input[replace]
+        carry.y_true[replace] = y_true[replace]
+        carry.y[replace] = self.model.y_init(x_input[replace])
+        carry.z[replace] = self.model.z_init(x_input[replace])
         carry.supervision_count[replace] = 0
 
         # Single supervision step
@@ -111,23 +113,21 @@ class LitTRM(L.LightningModule):
         pred_loss = softmax_cross_entropy(y_hat, carry.y_true)
         halt_loss = binary_cross_entropy(q_hat, y_hat, carry.y_true)
         loss = pred_loss + halt_loss
-
         halt = q_hat.detach() >= self.halt_prob_threshold
 
         # Update carry state
         carry.supervision_count += 1
         carry.y = y
         carry.z = z
-        completed = halt | (carry.supervision_count >= self.N_supervision)
-        carry.completed = completed
+        carry.completed = halt | (carry.supervision_count >= self.N_supervision)
 
-        # Logging
+        # Logging - no need, just return! TODO
         self.log("loss", loss, prog_bar=True)
         self.log("halt_loss", halt_loss, prog_bar=True)
         lr = self.trainer.optimizers[0].param_groups[0]["lr"]
         self.log("lr", lr, prog_bar=True)
-        if completed.any():
-            avg_sup = carry.supervision_count[completed].float().mean()
+        if carry.completed.any():
+            avg_sup = carry.supervision_count[carry.completed].float().mean()
             self.log("avg_sup", avg_sup, prog_bar=True)
 
         return loss
