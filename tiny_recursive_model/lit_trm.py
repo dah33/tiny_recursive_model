@@ -120,6 +120,7 @@ class LitTRM(L.LightningModule):
 
         # Logging
         self.log("loss", loss, prog_bar=True)
+        self.log("pred_loss", pred_loss, prog_bar=False)
         self.log("halt_loss", halt_loss, prog_bar=True)
         lr = self.trainer.optimizers[0].param_groups[0]["lr"]
         self.log("lr", lr, prog_bar=True)
@@ -185,6 +186,7 @@ class LitTRM(L.LightningModule):
         cell_acc = (y_hat.argmax(dim=-1) == y_true).float().mean()
         acc = (y_hat.argmax(dim=-1) == y_true).all(dim=-1).float().mean()
         self.log("val_loss", loss, prog_bar=True)
+        self.log("val_pred_loss", loss - halt_loss)
         self.log("val_halt_loss", halt_loss)
         self.log("val_avg_sup", avg_sup)
         self.log("cell_acc", cell_acc, prog_bar=True)
