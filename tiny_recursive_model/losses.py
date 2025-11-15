@@ -2,13 +2,28 @@ import torch
 from torch import Tensor
 
 
-def s(x, epsilon=1e-30):
-    return torch.where(x < 0, 1 / (1 - x + epsilon), x + 1)
+def log_stablemax(logits: Tensor, dim: int = -1, clamp_min: float = -10.0) -> Tensor:
+    """
+    Compute log-probabilities using stablemax normalization.
+    
+    StableMax applies s(x) = (x + 1) if x >= 0, else 1 / (1 - x), then normalizes.
+    Logits are clamped to avoid extreme negative values that cause instability.
 
-
-def log_stablemax(x, dim=-1):
-    s_x = s(x)
-    return torch.log(s_x / torch.sum(s_x, dim=dim, keepdim=True))
+    Based on: https://github.com/QuixiAI/stablemax-orthogonal
+    
+    Args:
+        logits: Input logits
+        dim: Dimension to normalize over
+        clamp_min: Minimum value to clamp logits to (default: -10.0)
+    
+    Returns:
+        Log-probabilities
+    """
+    # Clamp extreme negative logits
+    logits = torch.clamp(logits, min=clamp_min)
+    s_logits = torch.where(logits >= 0, logits + 1, 1 / (1 - logits))
+    s_sum = s_logits.sum(dim=dim, keepdim=True)
+    return torch.log(s_logits / (s_sum + 1e-9) + 1e-9)
 
 
 def stablemax_cross_entropy(
