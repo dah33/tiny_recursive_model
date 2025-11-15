@@ -6,13 +6,24 @@ from einops import rearrange
 from torch import Tensor
 from torch.nn import functional as F
 
+from tiny_recursive_model import losses
 from tiny_recursive_model.paper.model import TinyRecursiveModel
 
 
-def softmax_cross_entropy(token_logits: Tensor, target_tokens: Tensor) -> Tensor:
+def softmax_cross_entropy(
+    token_logits: Tensor, target_tokens: Tensor, ignore_index: int = -100
+) -> Tensor:
     flat_logits = rearrange(token_logits, "B L D -> (B L) D")
     flat_target = rearrange(target_tokens, "B L -> (B L)")
-    return F.cross_entropy(flat_logits, flat_target)  # mean over flattened B x L
+    return F.cross_entropy(flat_logits, flat_target, ignore_index=ignore_index)
+
+
+def stablemax_cross_entropy(
+    token_logits: Tensor, target_tokens: Tensor, ignore_index: int = -100
+) -> Tensor:
+    flat_logits = rearrange(token_logits, "B L D -> (B L) D")
+    flat_target = rearrange(target_tokens, "B L -> (B L)")
+    return losses.stablemax_cross_entropy(flat_logits, flat_target, ignore_index)
 
 
 def binary_cross_entropy(
@@ -21,7 +32,7 @@ def binary_cross_entropy(
     # 1 if the entire predicted sequence matches the target sequence
     is_seq_correct = (token_logits.argmax(dim=-1) == target_tokens).all(dim=-1)
     target = is_seq_correct.to(dtype=halt_logits.dtype)
-    return F.binary_cross_entropy_with_logits(halt_logits, target)  # mean over batch
+    return F.binary_cross_entropy_with_logits(halt_logits, target)
 
 
 @dataclass
@@ -109,7 +120,7 @@ class LitTRM(L.LightningModule):
 
         # Single supervision step
         (y, z), y_hat, q_hat = self.model(carry.x_input, carry.y, carry.z)
-        pred_loss = softmax_cross_entropy(y_hat, carry.y_true)
+        pred_loss = stablemax_cross_entropy(y_hat, carry.y_true)
         halt_loss = binary_cross_entropy(q_hat, y_hat, carry.y_true)
         loss = pred_loss + self.halt_loss_weight * halt_loss
         halt = q_hat.detach() >= 0.0  # 50% probability threshold
@@ -145,7 +156,7 @@ class LitTRM(L.LightningModule):
         for supervision_step in range(self.N_supervision):
             (y, z), y_hat, q_hat = self.model(x_input, y, z)
 
-            pred_loss = softmax_cross_entropy(y_hat, y_true)
+            pred_loss = stablemax_cross_entropy(y_hat, y_true)
             halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
             loss = pred_loss + self.halt_loss_weight * halt_loss
             sample_count += x_input.size(0)
