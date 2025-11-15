@@ -137,7 +137,7 @@ class LitTRM(L.LightningModule):
         y, z = None, None
         halt = torch.zeros_like(puzzle_ids, dtype=torch.bool)
         final_loss, final_halt_loss = 0.0, 0.0
-        batch_size = x_input.shape[0]
+        batch_size = x_input.size(0)
         sample_count = 0
         y_hat_final = y_hat_active = None
 
@@ -148,14 +148,16 @@ class LitTRM(L.LightningModule):
             pred_loss = softmax_cross_entropy(y_hat, y_true)
             halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
             loss = pred_loss + self.halt_loss_weight * halt_loss
-            sample_count += x_input.shape[0]
+            sample_count += x_input.size(0)
 
             halt = q_hat.detach() >= 0.0  # 50% probability threshold
 
             # Accumulate losses if at final supervision step
             is_final_step = halt | (supervision_step == self.N_supervision - 1)
-            final_loss += loss.item() * is_final_step.sum() / batch_size
-            final_halt_loss += halt_loss.item() * is_final_step.sum() / batch_size
+            final_loss += loss.item() * is_final_step.sum().item() / batch_size
+            final_halt_loss += (
+                halt_loss.item() * is_final_step.sum().item() / batch_size
+            )
 
             # Save predictions: full final output and active subset view
             if y_hat_active is None:
