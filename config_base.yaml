@@ -56,7 +56,6 @@ model:
   rms_norm_eps: 1.0e-05
   T: 3
   n: 6
-  halt_prob_threshold: 0.5
   N_supervision: 16
   activation_checkpointing: false
 data:

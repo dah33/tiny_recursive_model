@@ -14,7 +14,6 @@ import math
 from functools import partial
 
 import torch
-from einops import repeat
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
@@ -35,7 +34,7 @@ def deep_recursion(net, pred_head, halt_head, x, y, z, n=6, T=3):
     with torch.no_grad():
         for _ in range(T - 1):
             y, z = latent_recursion(net, x, y, z, n)
-    # recursing T−1 times to improve y and z (no gradients needed)
+    # recursing once to improve y and z
     y, z = latent_recursion(net, x, y, z, n)
     return (y.detach(), z.detach()), pred_head(y), halt_head(y)
 

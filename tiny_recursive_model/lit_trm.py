@@ -49,7 +49,6 @@ class LitTRM(L.LightningModule):
         # Recursion
         T: int = 3,
         n: int = 6,
-        halt_prob_threshold: float = 0.5,
         N_supervision: int = 16,
         activation_checkpointing: bool = False,
     ):
@@ -59,7 +58,6 @@ class LitTRM(L.LightningModule):
         self.save_hyperparameters()
 
         # Hyperparameters used in training and forward
-        self.halt_prob_threshold = halt_prob_threshold
         self.N_supervision = N_supervision
         self.activation_checkpointing = activation_checkpointing
 
@@ -112,7 +110,7 @@ class LitTRM(L.LightningModule):
         pred_loss = softmax_cross_entropy(y_hat, carry.y_true)
         halt_loss = binary_cross_entropy(q_hat, y_hat, carry.y_true)
         loss = pred_loss + halt_loss
-        halt = q_hat.detach() >= self.halt_prob_threshold
+        halt = q_hat.detach() >= 0.0  # 50% probability threshold
 
         # Update carry state
         carry.y = y
@@ -149,7 +147,7 @@ class LitTRM(L.LightningModule):
             loss = pred_loss + halt_loss
             sample_count += x_input.shape[0]
 
-            halt = q_hat >= self.halt_prob_threshold
+            halt = q_hat.detach() >= 0.0  # 50% probability threshold
 
             # Accumulate losses if at final supervision step
             is_final_step = halt | (supervision_step == self.N_supervision - 1)
