@@ -58,6 +58,7 @@ model:
   n: 6
   N_supervision: 16
   activation_checkpointing: false
+  halt_loss_weight: 0.5
 data:
   root_dir: data/sudoku-extreme-1k-aug-1000
   batch_size: 768

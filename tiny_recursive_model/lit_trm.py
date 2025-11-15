@@ -51,6 +51,7 @@ class LitTRM(L.LightningModule):
         n: int = 6,
         N_supervision: int = 16,
         activation_checkpointing: bool = False,
+        halt_loss_weight: float = 0.5,
     ):
         super().__init__()
 
@@ -60,6 +61,7 @@ class LitTRM(L.LightningModule):
         # Hyperparameters used in training and forward
         self.N_supervision = N_supervision
         self.activation_checkpointing = activation_checkpointing
+        self.halt_loss_weight = halt_loss_weight
 
         self.model = TinyRecursiveModel(
             vocab_size=vocab_size,
@@ -109,7 +111,7 @@ class LitTRM(L.LightningModule):
         (y, z), y_hat, q_hat = self.model(carry.x_input, carry.y, carry.z)
         pred_loss = softmax_cross_entropy(y_hat, carry.y_true)
         halt_loss = binary_cross_entropy(q_hat, y_hat, carry.y_true)
-        loss = pred_loss + halt_loss
+        loss = pred_loss + self.halt_loss_weight * halt_loss
         halt = q_hat.detach() >= 0.0  # 50% probability threshold
 
         # Update carry state
@@ -145,7 +147,7 @@ class LitTRM(L.LightningModule):
 
             pred_loss = softmax_cross_entropy(y_hat, y_true)
             halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
-            loss = pred_loss + halt_loss
+            loss = pred_loss + self.halt_loss_weight * halt_loss
             sample_count += x_input.shape[0]
 
             halt = q_hat.detach() >= 0.0  # 50% probability threshold
