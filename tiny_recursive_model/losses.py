@@ -27,7 +27,7 @@ def stablemax_cross_entropy(
     Returns:
         Scalar loss value (mean over valid tokens)
     """
-    logits = logits.float()  # Ensure float32 for stability
+    logits = logits.to(torch.float64)  # for stability
     logprobs = log_stablemax(logits, dim=-1)
 
     valid_mask = target != ignore_index
