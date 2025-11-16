@@ -23,7 +23,5 @@ model:
   N_supervision: 1  # Paper uses 16, which doesn't increase memory but slows training
   activation_checkpointing: false  # Set to true for n=3-6 (saves memory but slows training)
 lr_scheduler: # dummy, no warmup
-  class_path: torch.optim.lr_scheduler.ConstantLR
   init_args:
-    factor: 1.0
-    total_iters: 1
+    start_factor: 1.0

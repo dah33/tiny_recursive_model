@@ -81,9 +81,10 @@ optimizer:
 lr_scheduler:
   class_path: torch.optim.lr_scheduler.LinearLR
   init_args:
-    # Paper = 2000 steps x 768 samples = 1.5M samples = ~1.5 epochs
-    # Approximate here with 0.333, 0.666 over first 2 epochs
-    start_factor: 0.333
+    # Paper's 2000 steps linear warmup from 0 to 1 of the base LR
+    # Note: 2000 steps x 768 samples = 1.5M samples = ~1.5 epochs
+    start_factor: 0.0005
     end_factor: 1.0
-    total_iters: 2 # epochs, as Lightning CLI doesn't support interval='step'
+    total_iters: 1999
     last_epoch: -1
+lr_scheduler_interval: step # workaround, see code
