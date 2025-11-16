@@ -90,4 +90,4 @@ lr_scheduler:
     end_factor: 1.0
     total_iters: 1999
     last_epoch: -1
-lr_scheduler_interval: step # workaround, see code
+    # interval: step # hardcoded, see code

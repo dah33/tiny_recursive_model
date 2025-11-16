@@ -17,21 +17,20 @@ class TorchCompileCLI(LightningCLI):
             default=False,
             help="Enable torch.compile for the model (default: False, not recommended with microbatch_count > 1)",
         )
-        # Workaround as LightningCLI does not yet support setting lr_scheduler.interval
-        parser.add_argument(
-            "--lr_scheduler_interval",
-            type=str,
-            default="epoch",
-            choices=["epoch", "step"],
-            help="Interval for learning rate scheduler: 'epoch' or 'step' (default: epoch)",
-        )
+
+    @staticmethod
+    def configure_optimizers(_, optimizer, lr_scheduler=None):
+        # Workaround as LightningCLI does not support setting lr_scheduler.interval
+        if lr_scheduler is None:
+            return optimizer
+        return [optimizer], [
+            {
+                "scheduler": lr_scheduler,
+                "interval": "step",
+            }
+        ]
 
     def fit(self, model: LitTRM, **kwargs) -> None:
-        # Apply lr_scheduler_interval setting
-        if self.config["fit"].get("lr_scheduler_interval") == "step":
-            for scheduler_config in self.trainer.lr_scheduler_configs:
-                scheduler_config.interval = "step"
-
         if self.config["fit"].get("compile", False):
             # Compiled with expected warnings suppressed:
             warnings.filterwarnings(
