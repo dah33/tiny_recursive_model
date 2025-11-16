@@ -2,6 +2,7 @@ import logging
 import warnings
 
 import torch
+from jsonargparse import ArgumentParser
 from lightning.pytorch.cli import LightningCLI
 
 from tiny_recursive_model.lit_trm import LitTRM
@@ -9,7 +10,7 @@ from tiny_recursive_model.sudoku import SudokuDataModule
 
 
 class TorchCompileCLI(LightningCLI):
-    def add_arguments_to_parser(self, parser):
+    def add_arguments_to_parser(self, parser: ArgumentParser) -> None:
         parser.add_argument(
             "--compile",
             type=bool,
@@ -17,8 +18,8 @@ class TorchCompileCLI(LightningCLI):
             help="Enable torch.compile for the model (default: False, not recommended with microbatch_count > 1)",
         )
 
-    def fit(self, model, **kwargs):
-        if self.config.get("compile", False):
+    def fit(self, model: LitTRM, **kwargs) -> None:
+        if self.config["fit"].get("compile", False):
             # Compiled with expected warnings suppressed:
             warnings.filterwarnings(
                 "ignore", message=".*does not support bfloat16 compilation natively.*"
