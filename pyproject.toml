@@ -16,6 +16,7 @@ dependencies = [
     "tensorboard>=2.20.0",
     "torch>=2.4",
     "jsonargparse[signatures]>=4.42",
+    "wandb>=0.18",
 ]
 
 [build-system]

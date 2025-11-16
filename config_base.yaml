@@ -11,7 +11,11 @@ trainer:
   devices: auto
   num_nodes: 1
   precision: bf16-mixed
-  logger: null
+  logger:
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
+    init_args:
+      project: trm
+      log_model: true
   callbacks:
     - class_path: tiny_recursive_model.ema_callback.EMAWeightAveraging
       init_args:
