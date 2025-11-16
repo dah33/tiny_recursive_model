@@ -11,7 +11,7 @@ dependencies = [
     "einops>=0.8.1",
     "ema-pytorch",
     "huggingface-hub>=1.1.2",
-    "lightning>=2.5.5",
+    "lightning>=2.6.0",
     "pydantic>=2.12.3",
     "tensorboard>=2.20.0",
     "torch>=2.4",
@@ -24,3 +24,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tiny_recursive_model"]
+
+[tool.uv.sources]
+lightning = { git = "https://github.com/Lightning-AI/pytorch-lightning.git", rev = "43c20230bbf835bcae6e376f08f0a08bdd72935b" }

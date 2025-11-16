@@ -12,7 +12,10 @@ trainer:
   num_nodes: 1
   precision: bf16-mixed
   logger: null
-  callbacks: null
+  callbacks:
+    - class_path: tiny_recursive_model.ema_callback.EMAWeightAveraging
+      init_args:
+        decay: 0.999
   fast_dev_run: false
   max_epochs: 50 # 50 runs through 1M samples (1k puzzles x 1k augmentations), so 50k runs through 1k unique puzzles
   min_epochs: null
@@ -71,7 +74,7 @@ optimizer:
     - 0.9
     - 0.95
     eps: 1.0e-08
-    weight_decay: 1.0 # high, as per paper
+    weight_decay: 1.0 # high, requires stablemax loss, per paper
     amsgrad: false
     maximize: false
     foreach: null

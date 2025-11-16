@@ -51,9 +51,9 @@ class TorchCompileCLI(LightningCLI):
 #   - halted = halted & (steps >= min_halt_steps)
 #   - This prevents early halting for exploration purposes
 # - high WD (and LR)
-#   - EMA - can use the Weighted callback built into Lightning (soon)
-#   - stablemax_cross_entropy loss function
-# - paper has loss + 0.5 * (halt_loss  + continue_loss), so loss + 0.5 * halt_loss
+#   - EMA - can use the Weighted callback built into Lightning (soon) - need to test
+#   - gradient clipping? not used in original TRM code I think
+#   - adam tan optimizer
 
 
 def main() -> None:
