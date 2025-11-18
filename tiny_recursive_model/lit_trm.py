@@ -63,6 +63,7 @@ class LitTRM(L.LightningModule):
         N_supervision: int = 16,
         activation_checkpointing: bool = False,
         halt_loss_weight: float = 0.5,
+        loss: str = "softmax",  # "softmax" or "stablemax"
     ):
         super().__init__()
 
@@ -85,6 +86,9 @@ class LitTRM(L.LightningModule):
             n=n,
             T=T,
             activation_checkpointing=activation_checkpointing,
+        )
+        self.loss_fn = (
+            stablemax_cross_entropy if loss == "stablemax" else softmax_cross_entropy
         )
 
     def on_train_epoch_start(self):
@@ -120,7 +124,7 @@ class LitTRM(L.LightningModule):
 
         # Single supervision step
         (y, z), y_hat, q_hat = self.model(carry.x_input, carry.y, carry.z)
-        pred_loss = stablemax_cross_entropy(y_hat, carry.y_true)
+        pred_loss = self.loss_fn(y_hat, carry.y_true)
         halt_loss = binary_cross_entropy(q_hat, y_hat, carry.y_true)
         loss = pred_loss + self.halt_loss_weight * halt_loss
         halt = q_hat.detach() >= 0.0  # 50% probability threshold
@@ -156,7 +160,7 @@ class LitTRM(L.LightningModule):
         for supervision_step in range(self.N_supervision):
             (y, z), y_hat, q_hat = self.model(x_input, y, z)
 
-            pred_loss = stablemax_cross_entropy(y_hat, y_true)
+            pred_loss = self.loss_fn(y_hat, y_true)
             halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
             loss = pred_loss + self.halt_loss_weight * halt_loss
             sample_count += x_input.size(0)

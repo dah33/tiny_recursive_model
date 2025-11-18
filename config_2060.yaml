@@ -13,7 +13,7 @@
 compile: false  # No benefit with this setup
 trainer:
   accumulate_grad_batches: 4  # Process 4×192=768 samples before optimizer step
-  val_check_interval:
+  logger: null
 data:
   batch_size: 192  # Smaller batches for 6GB VRAM
 model:
