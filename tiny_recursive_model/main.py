@@ -53,6 +53,29 @@ class TorchCompileCLI(LightningCLI):
 #   - EMA - can use the Weighted callback built into Lightning (soon) - need to test
 #   - gradient clipping? not used in original TRM code I think
 #   - adam tan optimizer
+# - val_avg_sup is summing rather than averaging?
+# - metrics into folders?
+#
+# KNOBS TO TURN:
+# Capacity:
+#   hidden_dim: 256–768
+#   num_layers: {1, 2, 4}
+#   n (recursions): 3–8
+#   T (free recursions): 1–3
+# Regularisation:
+#   weight_decay: {0.01, 0.1, 1.0}
+#   ema_decay: {0.99, 0.995, 0.999}
+#   dropout: 0–0.1
+#   grad_clip: 0–1.0
+# Optimisation:
+#   lr: 5e-5 → 2e-4
+#   warmup_steps: 500–2000
+#   precision: fp32 / bf16 / bf16-mixed
+# Data (usually fixed):
+#   symmetry_aug: on/off
+#   digit_perm_aug: on/off
+# Paper defaults:
+#   layers=2, dim=512, n=6, T=3, wd=1.0, lr=1e-4, warmup=2000
 
 
 def main() -> None:

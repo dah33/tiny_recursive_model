@@ -141,6 +141,17 @@ class LitTRM(L.LightningModule):
         self.log("halt_loss", halt_loss, prog_bar=True)
         lr = self.trainer.optimizers[0].param_groups[0]["lr"]
         self.log("lr", lr, prog_bar=True)
+        preds = y_hat.argmax(dim=-1)
+        cell_acc = (preds == carry.y_true).float().mean()
+        acc = (preds == carry.y_true).all(dim=-1).float().mean()
+        self.log("train_cell_acc", cell_acc, prog_bar=True)
+        self.log("train_acc", acc, prog_bar=True)
+        halt_prob = torch.sigmoid(q_hat.detach())
+        supervision_step = carry.supervision_count.detach()
+        for step in supervision_step.unique():
+            mask = supervision_step == step
+            prob = halt_prob[mask].mean()
+            self.log(f"train_halt_prob_{int(step.item())}", prob)
         if carry.completed.any():
             avg_sup = carry.supervision_count[carry.completed].float().mean()
             self.log("avg_sup", avg_sup, prog_bar=True)
@@ -155,6 +166,7 @@ class LitTRM(L.LightningModule):
         batch_size = x_input.size(0)
         sample_count = 0
         y_hat_final = y_hat_active = None
+        halt_probs = []
 
         # No carry between supervision steps required
         for supervision_step in range(self.N_supervision):
@@ -166,6 +178,7 @@ class LitTRM(L.LightningModule):
             sample_count += x_input.size(0)
 
             halt = q_hat.detach() >= 0.0  # 50% probability threshold
+            halt_probs.append(torch.sigmoid(q_hat.detach()).mean().item())
 
             # Accumulate losses if at final supervision step
             is_final_step = halt | (supervision_step == self.N_supervision - 1)
@@ -190,8 +203,8 @@ class LitTRM(L.LightningModule):
             y_true = y_true[active]
             y_hat_active = y_hat_active[active]
 
-        avg_sup = sample_count / batch_size * self.N_supervision
-        return y_hat_final, (final_loss, final_halt_loss, avg_sup)
+        avg_sup = sample_count / batch_size
+        return y_hat_final, (final_loss, final_halt_loss, avg_sup, halt_probs)
 
     @torch.no_grad()
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
@@ -200,7 +213,7 @@ class LitTRM(L.LightningModule):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        y_hat, (loss, halt_loss, avg_sup) = self.forward(batch)
+        y_hat, (loss, halt_loss, avg_sup, halt_probs) = self.forward(batch)
         _, y_true, _ = batch.values()
         cell_acc = (y_hat.argmax(dim=-1) == y_true).float().mean()
         acc = (y_hat.argmax(dim=-1) == y_true).all(dim=-1).float().mean()
@@ -210,3 +223,5 @@ class LitTRM(L.LightningModule):
         self.log("val_avg_sup", avg_sup)
         self.log("cell_acc", cell_acc, prog_bar=True)
         self.log("acc", acc, prog_bar=True)
+        for idx, prob in enumerate(halt_probs, start=1):
+            self.log(f"val_halt_prob_{idx}", prob)
