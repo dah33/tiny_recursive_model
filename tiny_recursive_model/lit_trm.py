@@ -91,6 +91,10 @@ class LitTRM(L.LightningModule):
             stablemax_cross_entropy if loss == "stablemax" else softmax_cross_entropy
         )
 
+    def on_fit_start(self):
+        if hasattr(self.logger, "watch"):
+            self.logger.watch(self.model, log="all")
+
     def on_train_epoch_start(self):
         # Initialize one carry per gradient accumulation step
         self.carry = [None] * self.trainer.accumulate_grad_batches
