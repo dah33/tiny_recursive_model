@@ -137,21 +137,21 @@ class LitTRM(L.LightningModule):
 
         # Logging
         self.log("loss", loss, prog_bar=True)
-        self.log("pred_loss", pred_loss, prog_bar=False)
+        self.log("pred_loss", pred_loss)
         self.log("halt_loss", halt_loss, prog_bar=True)
         lr = self.trainer.optimizers[0].param_groups[0]["lr"]
         self.log("lr", lr, prog_bar=True)
         preds = y_hat.argmax(dim=-1)
         cell_acc = (preds == carry.y_true).float().mean()
         acc = (preds == carry.y_true).all(dim=-1).float().mean()
-        self.log("train_cell_acc", cell_acc, prog_bar=True)
-        self.log("train_acc", acc, prog_bar=True)
+        self.log("train_cell_acc", cell_acc)
+        self.log("train_acc", acc)
         halt_prob = torch.sigmoid(q_hat.detach())
         supervision_step = carry.supervision_count.detach()
         for step in supervision_step.unique():
             mask = supervision_step == step
             prob = halt_prob[mask].mean()
-            self.log(f"train_halt_prob_{int(step.item())}", prob)
+            self.log(f"halt_prob_{int(step.item())}", prob)
         if carry.completed.any():
             avg_sup = carry.supervision_count[carry.completed].float().mean()
             self.log("avg_sup", avg_sup, prog_bar=True)
