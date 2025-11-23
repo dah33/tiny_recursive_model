@@ -45,6 +45,12 @@ class TorchCompileCLI(LightningCLI):
 
 
 # TODO:
+# - logic bug? accuracy being computed with models at every step, even if not halted yet?
+#   - only impacts train though
+# - naming "exact accuracy" vs "cell accuracy"
+# - unsure about correctness of forward implementation as now quite different
+# - test set 10% of the way through so 5 epochs
+#
 # - With 10% probability (halt_exploration_prob: 0.1), the model is forced to continue for a random number of steps (2 to 16)
 #   - min_halt_steps = (rand() < 0.1) * randint(2, 16)
 #   - halted = halted & (steps >= min_halt_steps)

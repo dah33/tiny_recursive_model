@@ -35,11 +35,16 @@ def binary_cross_entropy(
     return F.binary_cross_entropy_with_logits(halt_logits, target)
 
 
-def calculate_accuracy(logits: Tensor, targets: Tensor) -> tuple[Tensor, Tensor]:
+def accuracy(
+    logits: Tensor, targets: Tensor, halt: Tensor
+) -> tuple[Tensor, Tensor, Tensor]:
     preds = logits.argmax(dim=-1)
-    cell_acc = (preds == targets).float().mean()
-    acc = (preds == targets).all(dim=-1).float().mean()
-    return cell_acc, acc
+    cell_correct = preds == targets
+    all_correct = cell_correct.all(dim=-1)
+    cell_acc = cell_correct.float().mean()
+    exact_acc = all_correct.float().mean()
+    halt_acc = (all_correct == halt).float().mean()
+    return cell_acc, exact_acc, halt_acc
 
 
 @dataclass
@@ -48,8 +53,8 @@ class TrainingCarry:
     y: Tensor
     z: Tensor
     y_true: Tensor
-    supervision_count: Tensor
-    completed: Tensor  # Boolean mask
+    steps: Tensor
+    halted: Tensor  # Boolean mask
 
 
 class LitTRM(L.LightningModule):
@@ -97,6 +102,7 @@ class LitTRM(L.LightningModule):
         self.loss_fn = (
             stablemax_cross_entropy if loss == "stablemax" else softmax_cross_entropy
         )
+        self.carry: list[TrainingCarry | None] = []
 
     def on_fit_start(self):
         # Watch model on wandb logger (if present)
@@ -111,7 +117,7 @@ class LitTRM(L.LightningModule):
         x_input, y_true, puzzle_ids = batch.values()
 
         # Determine which carry to use
-        carry_idx = batch_idx % self.trainer.accumulate_grad_batches
+        carry_idx: int = batch_idx % self.trainer.accumulate_grad_batches
 
         # Initialize carry on first use
         if self.carry[carry_idx] is None:
@@ -120,103 +126,78 @@ class LitTRM(L.LightningModule):
                 y_true=y_true,
                 y=self.model.y_init(x_input.size(0)),
                 z=self.model.z_init(x_input.size(0)),
-                supervision_count=torch.zeros_like(puzzle_ids, dtype=torch.long),
-                completed=torch.zeros_like(puzzle_ids, dtype=torch.bool),
+                steps=torch.zeros_like(puzzle_ids, dtype=torch.long),
+                halted=torch.zeros_like(puzzle_ids, dtype=torch.bool),
             )
 
-        # Replace completed slots with fresh samples
+        # Replace halted puzzles with fresh ones
         carry = self.carry[carry_idx]
-        replace = carry.completed
+        replace = carry.halted
         carry.x_input[replace] = x_input[replace]
         carry.y_true[replace] = y_true[replace]
         carry.y[replace] = self.model.y_init(x_input[replace].size(0))
         carry.z[replace] = self.model.z_init(x_input[replace].size(0))
-        carry.supervision_count[replace] = 0
-        carry.completed[replace] = False
+        carry.steps[replace] = 0
+        carry.halted[replace] = False
 
         # Single supervision step
         (y, z), y_hat, q_hat = self.model(carry.x_input, carry.y, carry.z)
         pred_loss = self.loss_fn(y_hat, carry.y_true)
         halt_loss = binary_cross_entropy(q_hat, y_hat, carry.y_true)
         loss = pred_loss + self.halt_loss_weight * halt_loss
-        halt = q_hat.detach() >= 0.0  # 50% probability threshold
+        y_hat, q_hat = y_hat.detach(), q_hat.detach()  # y, z already detached
 
         # Update carry state
         carry.y = y
         carry.z = z
-        carry.supervision_count += 1
-        carry.completed = halt | (carry.supervision_count >= self.N_supervision)
+        carry.steps += 1
 
-        # Logging per step metrics
-        self.log("loss", loss, prog_bar=True)
-        self.log("pred_loss", pred_loss)
-        self.log("halt_loss", halt_loss, prog_bar=True)
-        lr = self.trainer.optimizers[0].param_groups[0]["lr"]
-        self.log("lr", lr, prog_bar=True)
+        # Early stopping
+        halt_pred = q_hat >= 0.0  # 50% probability threshold
+        carry.halted = halt_pred | (carry.steps >= self.N_supervision)
 
-        # Logging per epoch metrics
-        cell_acc, acc = calculate_accuracy(y_hat, carry.y_true)
-        self.log("train_cell_acc", cell_acc, on_step=False, on_epoch=True)
-        self.log("train_acc", acc, on_step=False, on_epoch=True)
-        halt_prob = torch.sigmoid(q_hat.detach())
-        for step in carry.supervision_count.unique():
-            step_prob = halt_prob[carry.supervision_count == step].mean()
-            step_metric = f"halt_prob/step_{int(step.item()):02d}"
-            self.log(step_metric, step_prob, on_step=False, on_epoch=True)
-        if carry.completed.any():
-            # Average supervision steps for samples that have just completed
-            avg_sup = carry.supervision_count[carry.completed].float().mean()
-            self.log("avg_sup", avg_sup, prog_bar=True, on_step=False, on_epoch=True)
+        # Metrics for those just halted
+        # - Halt accuracy
+        # - Puzzle cell and exact accuracy
+        # - Supervision steps taken
+        just_halted = carry.halted  # as will be replaced next step!
+        if just_halted.any():
+            cell_acc, exact_acc, halt_acc = accuracy(
+                y_hat[just_halted], carry.y_true[just_halted], halt_pred[just_halted]
+            )
+            steps = carry.steps[just_halted].float().mean()
+
+        # Logging - for entire carry, including those not yet halted
+        self.log("train/lm_loss", pred_loss, prog_bar=True)
+        self.log("train/q_halt_loss", halt_loss, prog_bar=True)
+
+        # Logging - for those just halted
+        if just_halted.any():
+            self.log("train/accuracy", cell_acc)
+            self.log("train/exact_accuracy", exact_acc)
+            self.log("train/q_halt_accuracy", halt_acc)
+            self.log("train/steps", steps, prog_bar=True)
 
         return loss
 
-    def forward(self, batch):
-        x_input, y_true, puzzle_ids = batch.values()
-        y, z = None, None
-        halt = torch.zeros_like(puzzle_ids, dtype=torch.bool)
-        final_loss, final_halt_loss = 0.0, 0.0
-        batch_size = x_input.size(0)
-        sample_count = 0
-        y_hat_final = y_hat_active = None
-        halt_probs = []
+    def forward(self, batch) -> tuple[Tensor, tuple[Tensor, Tensor, Tensor]]:
+        x_input, y_true, _puzzle_ids = batch.values()
+        y = self.model.y_init(x_input.size(0))
+        z = self.model.z_init(x_input.size(0))
 
-        # No carry between supervision steps required
-        for supervision_step in range(self.N_supervision):
+        # Run all puzzles for N_supervision steps, no early stopping
+        for _ in range(self.N_supervision):
             (y, z), y_hat, q_hat = self.model(x_input, y, z)
+        y_hat, q_hat = y_hat.detach(), q_hat.detach()
 
-            pred_loss = self.loss_fn(y_hat, y_true)
-            halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
-            loss = pred_loss + self.halt_loss_weight * halt_loss
-            sample_count += x_input.size(0)
+        # Loss and accuracy for final step
+        pred_loss = self.loss_fn(y_hat, y_true)
+        halt_pred = q_hat >= 0.0  # 50% probability threshold
+        halt_loss = binary_cross_entropy(q_hat, y_hat, y_true)
+        cell_acc, exact_acc, halt_acc = accuracy(y_hat, y_true, halt_pred)
+        steps = self.N_supervision
 
-            halt = q_hat.detach() >= 0.0  # 50% probability threshold
-            halt_probs.append(torch.sigmoid(q_hat.detach()).mean().item())
-
-            # Accumulate losses if at final supervision step
-            is_final_step = halt | (supervision_step == self.N_supervision - 1)
-            final_loss += loss.item() * is_final_step.sum().item() / batch_size
-            final_halt_loss += (
-                halt_loss.item() * is_final_step.sum().item() / batch_size
-            )
-
-            # Save predictions: full final output and active subset view
-            if y_hat_active is None:
-                y_hat_final = y_hat_active = y_hat
-            else:
-                y_hat_active[:] = y_hat
-
-            if halt.all():
-                break
-
-            active = ~halt
-            x_input = x_input[active]
-            y = y[active]
-            z = z[active]
-            y_true = y_true[active]
-            y_hat_active = y_hat_active[active]
-
-        avg_sup = sample_count / batch_size
-        return y_hat_final, (final_loss, final_halt_loss, avg_sup, halt_probs)
+        return pred_loss, halt_loss, cell_acc, exact_acc, halt_acc, steps
 
     @torch.no_grad()
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
@@ -225,15 +206,20 @@ class LitTRM(L.LightningModule):
 
     @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        y_hat, (loss, halt_loss, avg_sup, halt_probs) = self.forward(batch)
-        _, y_true, _ = batch.values()
-        cell_acc, acc = calculate_accuracy(y_hat, y_true)
-        # Logging (default is per epoch)
-        self.log("val_loss", loss, prog_bar=True)
-        self.log("val_pred_loss", loss - halt_loss)
-        self.log("val_halt_loss", halt_loss)
-        self.log("val_avg_sup", avg_sup)
-        self.log("cell_acc", cell_acc, prog_bar=True)
-        self.log("acc", acc, prog_bar=True)
-        for idx, prob in enumerate(halt_probs, start=1):
-            self.log(f"val_halt_prob/step_{idx:02d}", prob)
+        pred_loss, halt_loss, cell_acc, exact_acc, halt_acc, steps = self.forward(batch)
+        self.log("val/lm_loss", pred_loss)
+        self.log("val/q_halt_loss", halt_loss)
+        self.log("val/accuracy", cell_acc)
+        self.log("val/exact_accuracy", exact_acc, prog_bar=True)
+        self.log("val/q_halt_accuracy", halt_acc)
+        self.log("val/steps", steps)  # always N_supervision--for symmetry
+
+    @torch.no_grad()
+    def test_step(self, batch, batch_idx):
+        pred_loss, halt_loss, cell_acc, exact_acc, halt_acc, steps = self.forward(batch)
+        self.log("test/lm_loss", pred_loss)
+        self.log("test/q_halt_loss", halt_loss)
+        self.log("test/accuracy", cell_acc)
+        self.log("test/exact_accuracy", exact_acc, prog_bar=True)
+        self.log("test/q_halt_accuracy", halt_acc)
+        self.log("test/steps", steps)  # always N_supervision--for symmetry

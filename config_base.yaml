@@ -16,7 +16,10 @@ trainer:
     init_args:
       project: trm
       log_model: true
-  # callbacks:
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
   #   - class_path: tiny_recursive_model.ema_callback.EMAWeightAveraging
   #     init_args:
   #       decay: 0.999
