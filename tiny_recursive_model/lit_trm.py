@@ -35,6 +35,13 @@ def binary_cross_entropy(
     return F.binary_cross_entropy_with_logits(halt_logits, target)
 
 
+def calculate_accuracy(logits: Tensor, targets: Tensor) -> tuple[Tensor, Tensor]:
+    preds = logits.argmax(dim=-1)
+    cell_acc = (preds == targets).float().mean()
+    acc = (preds == targets).all(dim=-1).float().mean()
+    return cell_acc, acc
+
+
 @dataclass
 class TrainingCarry:
     x_input: Tensor
@@ -92,6 +99,7 @@ class LitTRM(L.LightningModule):
         )
 
     def on_fit_start(self):
+        # Watch model on wandb logger (if present)
         if hasattr(self.logger, "watch"):
             self.logger.watch(self.model, log="all")
 
@@ -139,26 +147,26 @@ class LitTRM(L.LightningModule):
         carry.supervision_count += 1
         carry.completed = halt | (carry.supervision_count >= self.N_supervision)
 
-        # Logging
+        # Logging per step metrics
         self.log("loss", loss, prog_bar=True)
         self.log("pred_loss", pred_loss)
         self.log("halt_loss", halt_loss, prog_bar=True)
         lr = self.trainer.optimizers[0].param_groups[0]["lr"]
         self.log("lr", lr, prog_bar=True)
-        preds = y_hat.argmax(dim=-1)
-        cell_acc = (preds == carry.y_true).float().mean()
-        acc = (preds == carry.y_true).all(dim=-1).float().mean()
-        self.log("train_cell_acc", cell_acc)
-        self.log("train_acc", acc)
+
+        # Logging per epoch metrics
+        cell_acc, acc = calculate_accuracy(y_hat, carry.y_true)
+        self.log("train_cell_acc", cell_acc, on_step=False, on_epoch=True)
+        self.log("train_acc", acc, on_step=False, on_epoch=True)
         halt_prob = torch.sigmoid(q_hat.detach())
-        supervision_step = carry.supervision_count.detach()
-        for step in supervision_step.unique():
-            mask = supervision_step == step
-            prob = halt_prob[mask].mean()
-            self.log(f"halt_prob_{int(step.item())}", prob)
+        for step in carry.supervision_count.unique():
+            step_prob = halt_prob[carry.supervision_count == step].mean()
+            step_metric = f"halt_prob/step_{int(step.item()):02d}"
+            self.log(step_metric, step_prob, on_step=False, on_epoch=True)
         if carry.completed.any():
+            # Average supervision steps for samples that have just completed
             avg_sup = carry.supervision_count[carry.completed].float().mean()
-            self.log("avg_sup", avg_sup, prog_bar=True)
+            self.log("avg_sup", avg_sup, prog_bar=True, on_step=False, on_epoch=True)
 
         return loss
 
@@ -219,8 +227,8 @@ class LitTRM(L.LightningModule):
     def validation_step(self, batch, batch_idx):
         y_hat, (loss, halt_loss, avg_sup, halt_probs) = self.forward(batch)
         _, y_true, _ = batch.values()
-        cell_acc = (y_hat.argmax(dim=-1) == y_true).float().mean()
-        acc = (y_hat.argmax(dim=-1) == y_true).all(dim=-1).float().mean()
+        cell_acc, acc = calculate_accuracy(y_hat, y_true)
+        # Logging (default is per epoch)
         self.log("val_loss", loss, prog_bar=True)
         self.log("val_pred_loss", loss - halt_loss)
         self.log("val_halt_loss", halt_loss)
@@ -228,4 +236,4 @@ class LitTRM(L.LightningModule):
         self.log("cell_acc", cell_acc, prog_bar=True)
         self.log("acc", acc, prog_bar=True)
         for idx, prob in enumerate(halt_probs, start=1):
-            self.log(f"val_halt_prob_{idx}", prob)
+            self.log(f"val_halt_prob/step_{idx:02d}", prob)

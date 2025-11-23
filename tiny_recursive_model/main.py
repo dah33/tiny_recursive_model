@@ -55,6 +55,7 @@ class TorchCompileCLI(LightningCLI):
 #   - adam tan optimizer
 # - val_avg_sup is summing rather than averaging?
 # - metrics into folders?
+# - don't decay norm weights?
 #
 # KNOBS TO TURN:
 # Capacity:
